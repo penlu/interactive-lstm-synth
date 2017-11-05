@@ -1,2 +1,2 @@
-# interactive-lstm-synth
-LSTM on the wall
+# Program synthesis with LSTMs
+They even interact with the interpreter...!
