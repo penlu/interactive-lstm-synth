@@ -86,10 +86,6 @@ int main(int argc, char **argv) {
       // get target program
       readprog(prog_buf, sizeof(prog_buf));
 
-      // look up session data pointer
-      // (correct answers)
-      sess_vec = sess_lookup(sess_id);
-
       // evaluate candidate program
       char res[256];
       int err = bv8_eval(prog_buf, res);
@@ -105,6 +101,10 @@ int main(int argc, char **argv) {
         putchar(0);
         continue;
       }
+
+      // look up session data pointer
+      // (correct answers)
+      sess_vec = sess_lookup(sess_id);
 
       // compare to session vector storage structure
       // store erroneous output
