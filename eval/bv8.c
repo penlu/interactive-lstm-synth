@@ -100,5 +100,7 @@ int bv8_eval(char *prog, char *res) {
 
       prog++;
     }
+
+    res[x] = stack[0];
   }
 }
