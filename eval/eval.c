@@ -38,6 +38,8 @@ int readprog(char *buf, int len) {
 int main(int argc, char **argv) {
   // running in interactive mode by default
 
+  bv8_init();
+
   // main interaction loop
   while (1) {
     char   prog_buf[2048];
