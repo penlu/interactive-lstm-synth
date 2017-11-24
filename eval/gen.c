@@ -7,7 +7,7 @@
 
 #include "bv8.h"
 
-#define MAXLENGTH 3
+#define MAXLENGTH 10
 
 // custom hash table for this
 // quadratic probe
@@ -175,7 +175,7 @@ int main(int argc, char **argv) {
       // output program and its output
       printf("%s ", prog);
       for (int i = 0; i < 256; i++) {
-        printf("%02x", res[i]);
+        printf("%02x", (uint8_t) res[i]);
       }
 
       // check prog output
