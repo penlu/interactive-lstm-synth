@@ -1,0 +1,2 @@
+
+void giveup(int code);

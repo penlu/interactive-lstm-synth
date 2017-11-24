@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include "sess.h"
+#include "giveup.h"
 
 char **sess_root[65536] = {NULL};
 
@@ -9,7 +10,7 @@ char **sess_lookup(int sess_id) {
 
   if (sess_root[i1] == NULL) {
     sess_root[i1] = malloc(65536 * sizeof(char*));
-    if (sess_root[i1] == NULL) exit(0);
+    if (sess_root[i1] == NULL) giveup(0);
     for (int i = 0; i < 65536; i++) {
       sess_root[i1][i] = 0;
     }

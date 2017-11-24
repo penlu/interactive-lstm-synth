@@ -4,11 +4,12 @@
 #include "bv8.h"
 #include "sess.h"
 #include "rand.h"
+#include "giveup.h"
 
 // fail fast cause we suck
 int getchare() {
   int c = getchar();
-  if (c == EOF) exit(0);
+  if (c == EOF) giveup(0);
   return c;
 }
 
@@ -32,7 +33,7 @@ int readprog(char *buf, int len) {
   }
 
   // too long
-  exit(0);
+  giveup(0);
 }
 
 int main(int argc, char **argv) {
@@ -63,11 +64,11 @@ int main(int argc, char **argv) {
         free(*sess_vec);
       }
       *sess_vec = malloc(256);
-      if (*sess_vec == NULL) exit(0);
+      if (*sess_vec == NULL) giveup(0);
 
       // evaluate target program; result stored in session vector storage structure
       int err = bv8_eval(prog_buf, *sess_vec);
-      if (err) exit(0); // target progs shouldn't be messing up
+      if (err) giveup(0); // target progs shouldn't be messing up
 
     // SESSION QUERY
     } else if (c == 2) {

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include "bv8.h"
+#include "giveup.h"
 
 int stacksize = 0;
 char *stack = NULL;
@@ -12,7 +13,7 @@ int inst_argc[13] = { 1, 1, 1,
 
 void bv8_init() {
   stack = malloc(64);
-  if (stack == NULL) exit(0);
+  if (stack == NULL) giveup(0);
   stacksize = 64;
 }
 
@@ -30,7 +31,7 @@ int bv8_eval(char *prog, char *res) {
     while (s >= stacksize) {
       stacksize *= 2;
       stack = realloc(stack, stacksize);
-      if (stack == NULL) exit(0);
+      if (stack == NULL) giveup(0);
     }
 
     i++;
