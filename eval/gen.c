@@ -3,8 +3,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #include "bv8.h"
+
+#define MAXLENGTH 3
 
 // custom hash table for this
 // quadratic probe
@@ -12,7 +15,7 @@ struct htab {
   int       ents; // number of entries
   char      *tab; // table
   uint64_t  *occ; // occupancy, bitpacked flags
-}
+};
 
 // this hash is crap, figure out a better one later
 // we'll run out of memory long before overflowing,
@@ -85,8 +88,18 @@ void hash_insert(struct htab *t, char *res) {
       }
       hash_setocc(occ, h);
       return;
+    } else {
+      // duplicate check
+      char *loc = &(table[h * 256]);
+      for (int i = 0; i < 256; i++) {
+        if (loc[i] != res[i]) {
+          goto fail;
+        }
+      }
+      return;
     }
 
+fail:
     h = (h + inc) % ents;
     inc++;
   }
@@ -95,6 +108,9 @@ void hash_insert(struct htab *t, char *res) {
   int new_ents = ents * 2;
   char *new_tab = malloc(256 * new_ents);
   uint64_t *new_occ = malloc(new_ents / 64 * sizeof(uint64_t));
+  for (int i = 0; i < new_ents / 64; i++) {
+    new_occ[i] = 0;
+  }
   t->ents = new_ents;
   t->tab = new_tab;
   t->occ = new_occ;
@@ -111,8 +127,14 @@ void hash_insert(struct htab *t, char *res) {
   hash_insert(t, res); // and the new one
 }
 
+void hash_init(struct htab *t) {
+  t->ents = 128;
+  t->tab = malloc(128 * 256);
+  t->occ = malloc(128 / 64 * sizeof(uint64_t));
+}
+
 // table per size
-struct htab sz[7] = {0};
+struct htab sz[MAXLENGTH] = {0};
 
 // check a program output for duplication
 int is_dup(char *res, int maxlen) {
@@ -129,13 +151,15 @@ int main(int argc, char **argv) {
   bv8_init();
 
   // initialize hash tables
-
+  for (int i = 0; i < MAXLENGTH; i++) {
+    hash_init(&sz[i]);
+  }
 
   // start generating programs
   char res[256] = {0};
-  for (int length = 1; length < 7; length++) {
+  for (int length = 1; length <= MAXLENGTH; length++) {
     // make space for this size
-    int prog = malloc(length + 1);
+    char *prog = malloc(length + 1);
     for (int i = 0; i < length; i++) {
       prog[i] = '@';
     }
@@ -158,22 +182,25 @@ int main(int argc, char **argv) {
       int duplen = is_dup(res, length);
       if (duplen) {
         printf(" dup %d", duplen);
+      } else {
+        hash_insert(&sz[length - 1], res);
       }
       printf("\n");
 
-      hash_insert(&sz[length - 1], res);
 
       // next program
 next:
-      int i;
-      for (i = 0; i < length; i++) {
-        if (++prog[i] < 'M') {
+      {
+        int i;
+        for (i = 0; i < length; i++) {
+          if (++prog[i] < 'M') {
+            break;
+          }
+          prog[i] = '@';
+        }
+        if (i == length) {
           break;
         }
-        prog[i] = '@'
-      }
-      if (i == length) {
-        break;
       }
     }
 

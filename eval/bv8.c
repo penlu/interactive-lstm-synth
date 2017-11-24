@@ -21,9 +21,9 @@ int bv8_eval(char *prog, char *res) {
   // check for underflow/too many elements at termination
   int s = 0;
   for (int i = 0; prog[i]; i++) {
-    s += inst_argc[*prog - '@'];
+    s += inst_argc[prog[i] - '@'];
 
-    if (s < 0) {
+    if (s <= 0) {
       res[0] = i;
       return -1;
     }
@@ -33,8 +33,6 @@ int bv8_eval(char *prog, char *res) {
       stack = realloc(stack, stacksize);
       if (stack == NULL) giveup(0);
     }
-
-    i++;
   }
   if (s != 1) {
     res[0] = s;
