@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 
 l = [3]
 counts = []
-for c in range(100):
+for c in range(10):
   l2 = [0] * (len(l) + 1)
   for i in range(len(l)):
     l2[i] = 0
@@ -28,4 +28,4 @@ print regr.coef_, math.exp(regr.coef_[0])
 
 plt.plot(range(len(counts)), counts, ".")
 plt.plot(range(len(counts)), [i * math.log(13) for i in range(len(counts))], ".")
-plt.show()
+#plt.show()
