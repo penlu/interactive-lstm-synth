@@ -9,16 +9,17 @@ l = [3]
 counts = []
 for c in range(10):
   l2 = [0] * (len(l) + 1)
-  for i in range(len(l)):
+  for i in range(len(l) + 1):
     l2[i] = 0
     if i - 1 >= 0:
       l2[i] += l[i - 1] * 3
-    l2[i] += l[i] * 5
+    if i < len(l):
+      l2[i] += l[i] * 5
     if i + 1 < len(l):
       l2[i] += l[i + 1] * 4
     if i + 2 < len(l):
       l2[i] += l[i + 2]
-  print l[0]
+  print l
   counts += [math.log(l[0])]
   l = l2
 
