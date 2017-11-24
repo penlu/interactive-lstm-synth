@@ -103,4 +103,6 @@ int bv8_eval(char *prog, char *res) {
 
     res[x] = stack[0];
   }
+
+  return 0;
 }
