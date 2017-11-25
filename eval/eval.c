@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #include "bv8.h"
 #include "sess.h"
@@ -43,9 +44,9 @@ int main(int argc, char **argv) {
 
   // main interaction loop
   while (1) {
-    char   prog_buf[2048];
-    int    sess_id;      // session ID
-    char **sess_vec;  // session behavior vector
+    char    prog_buf[2048];
+    int     sess_id;        // session ID
+    uint8_t **sess_vec;     // session behavior vector
 
     char c = getchare();
 
@@ -90,7 +91,7 @@ int main(int argc, char **argv) {
       readprog(prog_buf, sizeof(prog_buf));
 
       // evaluate candidate program
-      char res[256];
+      uint8_t res[256];
       int err = bv8_eval(prog_buf, res);
       if (err == -1) {
         putchar('!');
@@ -111,8 +112,8 @@ int main(int argc, char **argv) {
 
       // compare to session vector storage structure
       // store erroneous output
-      int  err_num = 0;
-      char err_out[256];
+      int     err_num = 0;
+      uint8_t err_out[256];
       for (int i = 0; i < 256; i++) {
         if ((*sess_vec)[i] != res[i]) {
           err_out[err_num++] = i;

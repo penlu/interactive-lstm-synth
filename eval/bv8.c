@@ -18,7 +18,7 @@ void bv8_init() {
   stacksize = 64;
 }
 
-int bv8_eval(char *prog, char *res) {
+int bv8_eval(char *prog, uint8_t *res) {
   // check for underflow/too many elements at termination
   int s = 0;
   for (int i = 0; prog[i]; i++) {
@@ -44,7 +44,7 @@ int bv8_eval(char *prog, char *res) {
   for (int x = 0; x < 256; x++) {
     int s = 0;
     for (int i = 0; prog[i]; i++) {
-      char a, b, c;
+      uint8_t a, b, c;
       switch (prog[i]) {
         case 64:
           stack[s++] = 0;

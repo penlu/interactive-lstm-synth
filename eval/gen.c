@@ -13,14 +13,14 @@
 // quadratic probe
 struct htab {
   int       ents; // number of entries
-  char      *tab; // table
+  uint8_t   *tab; // table
   uint64_t  *occ; // occupancy, bitpacked flags
 };
 
 // this hash is crap, figure out a better one later
 // we'll run out of memory long before overflowing,
 // so we can be careless about the mod
-uint64_t hash(char *res, int len) {
+uint64_t hash(uint8_t *res, int len) {
   uint64_t h = 0;
   for (int i = 0; i < 256; i++) {
     h = (h * 33 + res[i]) % len;
@@ -37,9 +37,9 @@ void hash_setocc(uint64_t *occ, int h) {
   occ[h / 64] |= ((uint64_t) 1) << (h % 64);
 }
 
-char *hash_lookup(struct htab *t, char *res) {
+uint8_t *hash_lookup(struct htab *t, uint8_t *res) {
   int ents = t->ents;
-  char *table = t->tab;
+  uint8_t *table = t->tab;
   uint64_t *occ = t->occ;
 
   uint64_t h = hash(res, ents);
@@ -53,7 +53,7 @@ char *hash_lookup(struct htab *t, char *res) {
     }
 
     // compare entry
-    char *loc = &(table[h * 256]);
+    uint8_t *loc = &(table[h * 256]);
     for (int i = 0; i < 256; i++) {
       if (loc[i] != res[i]) {
         goto fail;
@@ -71,9 +71,9 @@ fail:
   return NULL;
 }
 
-void hash_insert(struct htab *t, char *res) {
+void hash_insert(struct htab *t, uint8_t *res) {
   int ents = t->ents;
-  char *table = t->tab;
+  uint8_t *table = t->tab;
   uint64_t *occ = t->occ;
 
   uint64_t h = hash(res, ents);
@@ -82,7 +82,7 @@ void hash_insert(struct htab *t, char *res) {
   for (int try = 0; try < 40; try++) {
     if (!hash_getocc(occ, h)) {
       // insert entry
-      char *loc = &(table[h * 256]);
+      uint8_t *loc = &(table[h * 256]);
       for (int i = 0; i < 256; i++) {
         loc[i] = res[i];
       }
@@ -90,7 +90,7 @@ void hash_insert(struct htab *t, char *res) {
       return;
     } else {
       // duplicate check
-      char *loc = &(table[h * 256]);
+      uint8_t *loc = &(table[h * 256]);
       for (int i = 0; i < 256; i++) {
         if (loc[i] != res[i]) {
           goto fail;
@@ -106,7 +106,7 @@ fail:
 
   // need to expand table...
   int new_ents = ents * 2;
-  char *new_tab = malloc(256 * new_ents);
+  uint8_t *new_tab = malloc(256 * new_ents);
   uint64_t *new_occ = malloc(new_ents / 64 * sizeof(uint64_t));
   for (int i = 0; i < new_ents / 64; i++) {
     new_occ[i] = 0;
@@ -118,7 +118,7 @@ fail:
   // copy over the old entries
   for (int i = 0; i < ents; i++) {
     if (hash_getocc(occ, i)) {
-      char *loc = &(table[h * 256]);
+      uint8_t *loc = &(table[h * 256]);
       hash_insert(t, loc);
     }
   }
@@ -137,7 +137,7 @@ void hash_init(struct htab *t) {
 struct htab sz[MAXLENGTH] = {0};
 
 // check a program output for duplication
-int is_dup(char *res, int maxlen) {
+int is_dup(uint8_t *res, int maxlen) {
   for (int i = 0; i < maxlen; i++) {
     if (hash_lookup(&sz[i], res)) {
       return i + 1;
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
   }
 
   // start generating programs
-  char res[256] = {0};
+  uint8_t res[256] = {0};
   for (int length = 1; length <= MAXLENGTH; length++) {
     // make space for this size
     char *prog = malloc(length + 1);

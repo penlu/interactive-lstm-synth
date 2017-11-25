@@ -1,3 +1,5 @@
+#include <inttypes.h>
+
 // initialize the evaluation stack
 void bv8_init(void);
 
@@ -7,4 +9,4 @@ void bv8_init(void);
 // 0 means successful evaluation
 // -1 means the program underflows; res[0] has the inst no. where this occurs
 // -2 means the program terminates with too many elements; res[0] has how many
-int bv8_eval(char *prog, char *res);
+int bv8_eval(char *prog, uint8_t *res);
