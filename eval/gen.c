@@ -205,5 +205,4 @@ next:
 
     free(prog);
   }
-  printf("died a natural death\n");
 }
