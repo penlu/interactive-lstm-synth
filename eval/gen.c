@@ -12,7 +12,7 @@
 // custom hash table for this
 // quadratic probe
 struct htab {
-  int       ents; // number of entries
+  size_t    ents; // number of entries
   uint8_t   *tab; // table
   uint64_t  *occ; // occupancy, bitpacked flags
 };
@@ -20,7 +20,7 @@ struct htab {
 // this hash is crap, figure out a better one later
 // we'll run out of memory long before overflowing,
 // so we can be careless about the mod
-uint64_t hash(uint8_t *res, int len) {
+uint64_t hash(uint8_t *res, uint64_t len) {
   uint64_t h = 0;
   for (int i = 0; i < 256; i++) {
     h = (h * 33 + res[i]) % len;
@@ -29,16 +29,16 @@ uint64_t hash(uint8_t *res, int len) {
 }
 
 // occupancy lookup logic
-int hash_getocc(uint64_t *occ, int h) {
+int hash_getocc(uint64_t *occ, uint64_t h) {
   return (occ[h / 64] >> (h % 64)) & 1;
 }
 
-void hash_setocc(uint64_t *occ, int h) {
+void hash_setocc(uint64_t *occ, uint64_t h) {
   occ[h / 64] |= ((uint64_t) 1) << (h % 64);
 }
 
 uint8_t *hash_lookup(struct htab *t, uint8_t *res) {
-  int ents = t->ents;
+  size_t ents = t->ents;
   uint8_t *table = t->tab;
   uint64_t *occ = t->occ;
 
@@ -72,7 +72,7 @@ fail:
 }
 
 void hash_insert(struct htab *t, uint8_t *res) {
-  int ents = t->ents;
+  size_t ents = t->ents;
   uint8_t *table = t->tab;
   uint64_t *occ = t->occ;
 
@@ -105,9 +105,9 @@ fail:
   }
 
   // need to expand table...
-  int new_ents = ents * 2;
-  uint8_t *new_tab = malloc(256 * new_ents);
-  uint64_t *new_occ = malloc(new_ents / 64 * sizeof(uint64_t));
+  size_t new_ents = ents * 2;
+  uint8_t *new_tab = calloc(new_ents, 256);
+  uint64_t *new_occ = calloc(new_ents / 64, sizeof(uint64_t));
   for (int i = 0; i < new_ents / 64; i++) {
     new_occ[i] = 0;
   }
@@ -116,7 +116,7 @@ fail:
   t->occ = new_occ;
 
   // copy over the old entries
-  for (int i = 0; i < ents; i++) {
+  for (size_t i = 0; i < ents; i++) {
     if (hash_getocc(occ, i)) {
       uint8_t *loc = &(table[h * 256]);
       hash_insert(t, loc);
@@ -127,10 +127,11 @@ fail:
   hash_insert(t, res); // and the new one
 }
 
+#define HASHINITSIZE 128
 void hash_init(struct htab *t) {
-  t->ents = 128;
-  t->tab = malloc(128 * 256);
-  t->occ = malloc(128 / 64 * sizeof(uint64_t));
+  t->ents = HASHINITSIZE;
+  t->tab = calloc(HASHINITSIZE, 256);
+  t->occ = calloc(HASHINITSIZE / 64, sizeof(uint64_t));
 }
 
 // table per size
@@ -186,6 +187,7 @@ int main(int argc, char **argv) {
         hash_insert(&sz[length - 1], res);
       }
       printf("\n");
+      fflush(stdout);
 
       // next program
 next:
@@ -202,7 +204,11 @@ next:
         }
       }
     }
+    printf("next\n");
 
     free(prog);
   }
+
+  printf("done!\n");
+  fflush(stdout);
 }
