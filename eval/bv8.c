@@ -1,9 +1,10 @@
 #include <stdlib.h>
+#include <inttypes.h>
 #include "bv8.h"
 #include "giveup.h"
 
 int stacksize = 0;
-char *stack = NULL;
+uint8_t *stack = NULL;
 
 // stack element inc/dec by instruction
 int inst_argc[13] = { 1, 1, 1,
@@ -42,9 +43,9 @@ int bv8_eval(char *prog, char *res) {
   // evaluate on all inputs
   for (int x = 0; x < 256; x++) {
     int s = 0;
-    while (*prog) {
+    for (int i = 0; prog[i]; i++) {
       char a, b, c;
-      switch (*prog) {
+      switch (prog[i]) {
         case 64:
           stack[s++] = 0;
           break;
@@ -96,8 +97,6 @@ int bv8_eval(char *prog, char *res) {
           stack[s++] = !a ? b : c;
           break;
       }
-
-      prog++;
     }
 
     res[x] = stack[0];

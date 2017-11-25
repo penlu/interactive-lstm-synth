@@ -7,7 +7,7 @@
 
 #include "bv8.h"
 
-#define MAXLENGTH 10
+#define MAXLENGTH 8
 
 // custom hash table for this
 // quadratic probe
@@ -187,7 +187,6 @@ int main(int argc, char **argv) {
       }
       printf("\n");
 
-
       // next program
 next:
       {
@@ -206,4 +205,5 @@ next:
 
     free(prog);
   }
+  printf("died a natural death\n");
 }
