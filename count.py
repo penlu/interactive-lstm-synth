@@ -29,4 +29,4 @@ print regr.coef_, math.exp(regr.coef_[0])
 
 plt.plot(range(len(counts)), counts, ".")
 plt.plot(range(len(counts)), [i * math.log(13) for i in range(len(counts))], ".")
-#plt.show()
+plt.show()
