@@ -7,7 +7,7 @@
 
 #include "bv8.h"
 
-#define MAXLENGTH 8
+#define MAXLENGTH 9
 
 // custom hash table for this
 // quadratic probe
