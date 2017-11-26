@@ -13,11 +13,6 @@ int main(int argc, char **argv) {
   // initialize evaluator
   bv8_init();
 
-  // initialize hash tables
-  for (int i = 0; i < MAXLENGTH; i++) {
-    hash_init(&sz[i]);
-  }
-
   // start generating programs
   uint8_t res[256] = {0};
   for (int length = 1; length <= MAXLENGTH; length++) {
