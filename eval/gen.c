@@ -13,12 +13,12 @@
 #define MAXLENGTH 9
 
 // table per size
-struct htab sz[MAXLENGTH] = {0};
+struct htab *sz[MAXLENGTH] = {0};
 
 // check a program output for duplication
 int is_dup(uint8_t *res, int maxlen) {
   for (int i = 0; i < maxlen; i++) {
-    if (hash_lookup(&sz[i], res)) {
+    if (hash_lookup(sz[i], res)) {
       return i + 1;
     }
   }
@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
 
   // initialize hash tables
   for (int i = 0; i < MAXLENGTH; i++) {
-    hash_init(&sz[i]);
+    sz[i] = hash_init();
   }
 
   // start generating programs
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
       if (duplen) {
         printf(" dup %d", duplen);
       } else {
-        hash_insert(&sz[length - 1], res);
+        hash_insert(sz[length - 1], res);
       }
       printf("\n");
       fflush(stdout);

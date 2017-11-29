@@ -5,6 +5,14 @@
 
 #include "hash.h"
 
+// custom hash table for this
+// quadratic probe
+struct htab {
+  size_t    ents; // number of entries
+  uint8_t   *tab; // table
+  uint64_t  *occ; // occupancy, bitpacked flags
+};
+
 // this hash is crap, figure out a better one later
 // we'll run out of memory long before overflowing,
 // so we can be careless about the mod
@@ -116,9 +124,11 @@ fail:
 }
 
 #define HASHINITSIZE 128
-void hash_init(struct htab *t) {
+struct htab *hash_init() {
+  struct htab *t = malloc(sizeof(struct htab));
   t->ents = HASHINITSIZE;
   t->tab = calloc(HASHINITSIZE, 256);
   t->occ = calloc(HASHINITSIZE / 64, sizeof(uint64_t));
+  return t;
 }
 
