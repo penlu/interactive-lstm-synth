@@ -1,6 +1,8 @@
 // sequentially generate k-nuggets---programs of length k exhibiting behavior
 // not seen in any shorter program
 
+// we generate only non-redundant programs, marking same-length duplicates
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
