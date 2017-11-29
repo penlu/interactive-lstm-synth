@@ -2,4 +2,8 @@ eval
 gen
 gen2
 benchbv8
+eval-fast
+gen-fast
+gen2-fast
+benchbv8-fast
 tags
