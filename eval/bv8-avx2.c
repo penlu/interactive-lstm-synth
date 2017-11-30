@@ -95,7 +95,6 @@ int bv8_eval(char *prog, uint8_t *res) {
   // evaluate on all inputs
   // we use AVX-2 GCC intrinsics for this, evaluating in data-parallel
   // on 8 groups of 32 byte values (256 bits) each
-  prog = "BABGBBFLL\0";
   for (int v = 0; v < 8; v++) {
     int s = 0;
     for (int i = 0; prog[i]; i++) {
@@ -158,18 +157,7 @@ int bv8_eval(char *prog, uint8_t *res) {
     for (int i = 0; i < 32; i++) {
       res[v * 32 + i] = ((uint8_t*) stack)[i];
     }
-
-    break;
   }
-  for (int i = 0; i < 16; i++) {
-    for (int j = 0; j < 16; j++) {
-      printf("%02x ", ((uint8_t*) stack)[i * 16 + j]);
-    }
-    printf("\n");
-  }
-
-  exit(0);
-  return -1000;
 
   return 0;
 }

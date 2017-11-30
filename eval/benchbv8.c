@@ -7,7 +7,7 @@
 
 #include "bv8.h"
 
-#define MAXLENGTH 9
+#define MAXLENGTH 8
 
 int main(int argc, char **argv) {
   // initialize evaluator
