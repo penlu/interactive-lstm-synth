@@ -114,33 +114,51 @@ int bv8_eval(char *prog, uint8_t *res) {
     // we maintain a cache of the stack with at least 2 valid slots
     // below any given position:
     /*
+      BLOCKr0:
             v
       r6 r7 r0 r1 r2 r3 r4 r5
 
+      BLOCKr1:
                v
       r6 r7 r0 r1 r2 r3 r4 r5
             x
+
+      BLOCKr2:
                   v
       r6 r7 r0 r1 r2 r3 r4 r5
             x  x
+
+      BLOCKr3:
                      v
       r6 r7 r0 r1 r2 r3 r4 r5
             x  x  x
+
+      BLOCKr4:
                         v
                   r2 r3 r4 r5 r6 r7 r0 r1
             x  x  x  x
+
+      BLOCKr5:
                            v
                   r2 r3 r4 r5 r6 r7 r0 r1
             x  x  x  x  x
+
+      BLOCKr6:
                               v
                   r2 r3 r4 r5 r6 r7 r0 r1
             x  x  x  x  x  x
+
+      BLOCKr7:
                                  v
                   r2 r3 r4 r5 r6 r7 r0 r1
             x  x  x  x  x  x  x
+
+      BLOCKr0:
                                     v
                               r6 r7 r0 r1 r2 r3 r4 r5
             x  x  x  x  x  x  x  x
+
+      BLOCKr1:
                                        v
                               r6 r7 r0 r1 r2 r3 r4 r5
             x  x  x  x  x  x  x  x  x
@@ -199,7 +217,7 @@ int bv8_eval(char *prog, uint8_t *res) {
           goto blockr7;
         case 75:
           LOWCACHE_DOWN;
-          r6 = __mm2526_add_epi8(r6, r7);
+          r6 = __mm256_add_epi8(r6, r7);
           s--;
           goto blockr7;
         case 76:
@@ -255,7 +273,7 @@ blockr0:
           s--;
           goto blockr0;
         case 75:
-          r7 = __mm2526_add_epi8(r7, r0);
+          r7 = __mm256_add_epi8(r7, r0);
           s--;
           goto blockr0;
         case 76:
@@ -299,30 +317,143 @@ blockr1:
           r1 = (r1 >> 4) & mask_0f;
           goto blockr2;
         case 72:
-          r7 = r7 & r0;
+          r0 = r0 & r1;
           s--;
-          goto blockr0;
+          goto blockr1;
         case 73:
-          r7 = r7 | r0;
+          r0 = r0 | r1;
           s--;
-          goto blockr0;
+          goto blockr1;
         case 74:
-          r7 = r7 ^ r0;
+          r0 = r0 ^ r1;
           s--;
-          goto blockr0;
+          goto blockr1;
         case 75:
-          r7 = __mm2526_add_epi8(r7, r0);
+          r0 = __mm256_add_epi8(r0, r1);
           s--;
-          goto blockr0;
+          goto blockr1;
         case 76:
-          LOWCACHE_DOWN;
-          a = _mm256_cmpeq_epi8(r0, zero);
-          r6 = (a & r7) | ((~ a) & r6);
+          a = _mm256_cmpeq_epi8(r1, zero);
+          r7 = (a & r0) | ((~ a) & r7);
           s -= 2;
-          goto blockr7;
+          goto blockr0;
       }
-blockr1:
+blockr2:
     }
+
+    // BLOCK r3
+    for (int i = 0; prog[i]; i++) {
+      switch (prog[i]) {
+        case 64:
+          LOWCACHE_UP;
+          r3 = zero;
+          s++;
+          goto blockr4;
+        case 65:
+          LOWCACHE_UP;
+          r3 = one;
+          s++;
+          goto blockr4;
+        case 66:
+          LOWCACHE_UP;
+          r3 = vecs[v];
+          s++;
+          goto blockr4;
+        case 67:
+          r2 = ~r2;
+          goto blockr3;
+        case 68:
+          r2 = (r2 << 1) & mask_fe;
+          goto blockr3;
+        case 69:
+          r2 = (r2 >> 1) & mask_7f;
+          goto blockr3;
+        case 70:
+          r2 = (r2 >> 2) & mask_3f;
+          goto blockr3;
+        case 71:
+          r2 = (r2 >> 4) & mask_0f;
+          goto blockr3;
+        case 72:
+          r1 = r1 & r2;
+          s--;
+          goto blockr2;
+        case 73:
+          r1 = r1 | r2;
+          s--;
+          goto blockr2;
+        case 74:
+          r1 = r1 ^ r2;
+          s--;
+          goto blockr2;
+        case 75:
+          r1 = __mm256_add_epi8(r1, r2);
+          s--;
+          goto blockr2;
+        case 76:
+          a = _mm256_cmpeq_epi8(r2, zero);
+          r0 = (a & r1) | ((~ a) & r0);
+          s -= 2;
+          goto blockr1;
+      }
+blockr3:
+    }
+
+    // BLOCK r4
+    for (int i = 0; prog[i]; i++) {
+      switch (prog[i]) {
+        case 64:
+          r4 = zero;
+          s++;
+          goto blockr5;
+        case 65:
+          r4 = one;
+          s++;
+          goto blockr5;
+        case 66:
+          r4 = vecs[v];
+          s++;
+          goto blockr5;
+        case 67:
+          r3 = ~r3;
+          goto blockr4;
+        case 68:
+          r3 = (r3 << 1) & mask_fe;
+          goto blockr4;
+        case 69:
+          r3 = (r3 >> 1) & mask_7f;
+          goto blockr4;
+        case 70:
+          r3 = (r3 >> 2) & mask_3f;
+          goto blockr4;
+        case 71:
+          r3 = (r3 >> 4) & mask_0f;
+          goto blockr4;
+        case 72:
+          r2 = r2 & r3;
+          s--;
+          goto blockr3;
+        case 73:
+          r2 = r2 | r3;
+          s--;
+          goto blockr3;
+        case 74:
+          r2 = r2 ^ r3;
+          s--;
+          goto blockr3;
+        case 75:
+          r2 = __mm256_add_epi8(r2, r3);
+          s--;
+          goto blockr3;
+        case 76:
+          a = _mm256_cmpeq_epi8(r3, zero);
+          r1 = (a & r2) | ((~ a) & r1);
+          s -= 2;
+          goto blockr2;
+      }
+blockr4:
+    }
+
     // copy result out
     for (int i = 0; i < 32; i++) {
       res[v * 32 + i] = ((uint8_t*) stack)[i];
