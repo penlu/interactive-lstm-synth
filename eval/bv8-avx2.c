@@ -75,16 +75,175 @@ const __m256i mask_0f =
   {0x0f0f0f0f0f0f0f0f, 0x0f0f0f0f0f0f0f0f,
    0x0f0f0f0f0f0f0f0f, 0x0f0f0f0f0f0f0f0f};
 
+// stack caching trickery: 8-register hand-over-hand
+// we maintain a cache of the stack with at least 2 valid slots
+// below any given position:
+/*
+  BLOCKr0:
+        v
+  r6 r7 r0 r1 r2 r3 r4 r5
+
+  BLOCKr1:
+           v
+  r6 r7 r0 r1 r2 r3 r4 r5
+        x
+
+  BLOCKr2:
+              v
+  r6 r7 r0 r1 r2 r3 r4 r5
+        x  x
+
+  BLOCKr3:
+                 v
+  r6 r7 r0 r1 r2 r3 r4 r5
+        x  x  x
+
+  BLOCKr4:
+                    v
+              r2 r3 r4 r5 r6 r7 r0 r1
+        x  x  x  x
+
+  BLOCKr5:
+                       v
+              r2 r3 r4 r5 r6 r7 r0 r1
+        x  x  x  x  x
+
+  BLOCKr6:
+                          v
+              r2 r3 r4 r5 r6 r7 r0 r1
+        x  x  x  x  x  x
+
+  BLOCKr7:
+                             v
+              r2 r3 r4 r5 r6 r7 r0 r1
+        x  x  x  x  x  x  x
+
+  BLOCKr0:
+                                v
+                          r6 r7 r0 r1 r2 r3 r4 r5
+        x  x  x  x  x  x  x  x
+
+  BLOCKr1:
+                                   v
+                          r6 r7 r0 r1 r2 r3 r4 r5
+        x  x  x  x  x  x  x  x  x
+*/
+// control flow is simplified because our movement is purely
+// register-dependent
+// we take memory hits when we cross the r7/r0 and r3/r4 line
+
+// in the ensuing, pass in the true alignment of cache reg 0
+
 // shuffle cache: write out + reload r2-r5
-#define LOWCACHE_DOWN \
-  stack[s + 2] = r2; \
-  stack[s + 3] = r3; \
-  stack[s + 4] = r4; \
-  stack[s + 5] = r5; \
-  r2 = stack[s - 6]; \
-  r3 = stack[s - 5]; \
-  r4 = stack[s - 4]; \
-  r5 = stack[s - 3];
+// occurs when we pass r7 -> r0
+#define LOCACHE_UP(s) \
+  sstack[s - 6] = r2; \
+  sstack[s - 5] = r3; \
+  sstack[s - 4] = r4; \
+  sstack[s - 3] = r5; \
+  r2 = sstack[s + 2]; \
+  r3 = sstack[s + 3]; \
+  r4 = sstack[s + 4]; \
+  r5 = sstack[s + 5];
+
+// occurs when we pass r0 -> r7
+#define LOCACHE_DN(s) \
+  sstack[s + 2] = r2; \
+  sstack[s + 3] = r3; \
+  sstack[s + 4] = r4; \
+  sstack[s + 5] = r5; \
+  r2 = sstack[s - 6]; \
+  r3 = sstack[s - 5]; \
+  r4 = sstack[s - 4]; \
+  r5 = sstack[s - 3];
+
+// shuffle cache: write out + reload r6-r1
+// occurs when we pass r3 -> r4
+#define HICACHE_UP(s) \
+  sstack[s - 2] = r6; \
+  sstack[s - 1] = r7; \
+  sstack[s + 0] = r0; \
+  sstack[s + 1] = r1; \
+  r6 = sstack[s + 6]; \
+  r7 = sstack[s + 7]; \
+  r0 = sstack[s + 8]; \
+  r1 = sstack[s + 9];
+
+// occurs when we pass r4 -> r3
+#define HICACHE_DN(s) \
+  sstack[s + 6] = r6; \
+  sstack[s + 7] = r7; \
+  sstack[s + 8] = r0; \
+  sstack[s + 9] = r1; \
+  r6 = sstack[s - 2]; \
+  r7 = sstack[s - 1]; \
+  r0 = sstack[s + 0]; \
+  r1 = sstack[s + 1];
+
+#define REGBLOCK(r_at1, r_at0, r_atn1, r_atn2, r_atn3, UP1, DOWN1, DOWN2) \
+  while (prog[i]) { \
+    switch (prog[i]) { \
+      __m256i a; \
+      case 64: \
+        UP1; \
+        r_at0 = zero; \
+        s++; \
+        goto block##r_at1; \
+      case 65: \
+        UP1; \
+        r_at0 = one; \
+        s++; \
+        goto block##r_at1; \
+      case 66: \
+        UP1; \
+        r_at0 = vecs[v]; \
+        s++; \
+        goto block##r_at1; \
+      case 67: \
+        r_atn1 = ~r_atn1; \
+        goto block##r_at0; \
+      case 68: \
+        r_atn1 = (r_atn1 << 1) & mask_fe; \
+        goto block##r_at0; \
+      case 69: \
+        r_atn1 = (r_atn1 >> 1) & mask_7f; \
+        goto block##r_at0; \
+      case 70: \
+        r_atn1 = (r_atn1 >> 2) & mask_3f; \
+        goto block##r_at0; \
+      case 71: \
+        r_atn1 = (r_atn1 >> 4) & mask_0f; \
+        goto block##r_at0; \
+      case 72: \
+        DOWN1; \
+        r_atn2 = r_atn2 & r_atn1; \
+        s--; \
+        goto block##r_atn1; \
+      case 73: \
+        DOWN1; \
+        r_atn2 = r_atn2 | r_atn1; \
+        s--; \
+        goto block##r_atn1; \
+      case 74: \
+        DOWN1; \
+        r_atn2 = r_atn2 ^ r_atn1; \
+        s--; \
+        goto block##r_atn1; \
+      case 75: \
+        DOWN1; \
+        r_atn2 = _mm256_add_epi8(r_atn2, r_atn1); \
+        s--; \
+        goto block##r_atn1; \
+      case 76: \
+        DOWN2; \
+        a = _mm256_cmpeq_epi8(r_atn1, zero); \
+        r_atn3 = (a & r_atn2) | ((~ a) & r_atn3); \
+        s -= 2; \
+        goto block##r_atn2; \
+    } \
+block##r_at0: \
+    i++; \
+  }
 
 int bv8_eval(char *prog, uint8_t *res) {
   // check for underflow/too many elements at termination
@@ -110,353 +269,23 @@ int bv8_eval(char *prog, uint8_t *res) {
   for (int v = 0; v < 8; v++) {
     int s = 0;
 
-    // stack caching trickery: 8-register hand-over-hand
-    // we maintain a cache of the stack with at least 2 valid slots
-    // below any given position:
-    /*
-      BLOCKr0:
-            v
-      r6 r7 r0 r1 r2 r3 r4 r5
-
-      BLOCKr1:
-               v
-      r6 r7 r0 r1 r2 r3 r4 r5
-            x
-
-      BLOCKr2:
-                  v
-      r6 r7 r0 r1 r2 r3 r4 r5
-            x  x
-
-      BLOCKr3:
-                     v
-      r6 r7 r0 r1 r2 r3 r4 r5
-            x  x  x
-
-      BLOCKr4:
-                        v
-                  r2 r3 r4 r5 r6 r7 r0 r1
-            x  x  x  x
-
-      BLOCKr5:
-                           v
-                  r2 r3 r4 r5 r6 r7 r0 r1
-            x  x  x  x  x
-
-      BLOCKr6:
-                              v
-                  r2 r3 r4 r5 r6 r7 r0 r1
-            x  x  x  x  x  x
-
-      BLOCKr7:
-                                 v
-                  r2 r3 r4 r5 r6 r7 r0 r1
-            x  x  x  x  x  x  x
-
-      BLOCKr0:
-                                    v
-                              r6 r7 r0 r1 r2 r3 r4 r5
-            x  x  x  x  x  x  x  x
-
-      BLOCKr1:
-                                       v
-                              r6 r7 r0 r1 r2 r3 r4 r5
-            x  x  x  x  x  x  x  x  x
-    */
-    // control flow is simplified because our movement is purely
-    // register-dependent
-    // we take memory hits when we cross the r7/r0 and r3/r4 line
-
-    __m256i a; // working variables
     __m256i r0, r1, r2, r3, r4, r5, r6, r7; // stack cache
 
-    // BLOCK r0
-    for (int i = 0; prog[i]; i++) {
-      switch (prog[i]) {
-        case 64:
-          r0 = zero;
-          s++;
-          goto blockr1;
-        case 65:
-          r0 = one;
-          s++;
-          goto blockr1;
-        case 66:
-          r0 = vecs[v];
-          s++;
-          goto blockr1;
-        case 67:
-          r7 = ~r7;
-          goto blockr0;
-        case 68:
-          r7 = (r7 << 1) & mask_fe;
-          goto blockr0;
-        case 69:
-          r7 = (r7 >> 1) & mask_7f;
-          goto blockr0;
-        case 70:
-          r7 = (r7 >> 2) & mask_3f;
-          goto blockr0;
-        case 71:
-          r7 = (r7 >> 4) & mask_0f;
-          goto blockr0;
-        case 72:
-          LOWCACHE_DOWN;
-          r6 = r6 & r7;
-          s--;
-          goto blockr7;
-        case 73:
-          LOWCACHE_DOWN;
-          r6 = r6 | r7;
-          s--;
-          goto blockr7;
-        case 74:
-          LOWCACHE_DOWN;
-          r6 = r6 ^ r7;
-          s--;
-          goto blockr7;
-        case 75:
-          LOWCACHE_DOWN;
-          r6 = __mm256_add_epi8(r6, r7);
-          s--;
-          goto blockr7;
-        case 76:
-          LOWCACHE_DOWN;
-          a = _mm256_cmpeq_epi8(r7, zero);
-          r5 = (a & r6) | ((~ a) & r5);
-          s -= 2;
-          goto blockr6;
-      }
-blockr0:
-    }
-
-    // BLOCK r1
-    for (int i = 0; prog[i]; i++) {
-      switch (prog[i]) {
-        case 64:
-          r1 = zero;
-          s++;
-          goto blockr2;
-        case 65:
-          r1 = one;
-          s++;
-          goto blockr2;
-        case 66:
-          r1 = vecs[v];
-          s++;
-          goto blockr2;
-        case 67:
-          r0 = ~r0;
-          goto blockr1;
-        case 68:
-          r0 = (r0 << 1) & mask_fe;
-          goto blockr1;
-        case 69:
-          r0 = (r0 >> 1) & mask_7f;
-          goto blockr1;
-        case 70:
-          r0 = (r0 >> 2) & mask_3f;
-          goto blockr1;
-        case 71:
-          r0 = (r0 >> 4) & mask_0f;
-          goto blockr1;
-        case 72:
-          r7 = r7 & r0;
-          s--;
-          goto blockr0;
-        case 73:
-          r7 = r7 | r0;
-          s--;
-          goto blockr0;
-        case 74:
-          r7 = r7 ^ r0;
-          s--;
-          goto blockr0;
-        case 75:
-          r7 = __mm256_add_epi8(r7, r0);
-          s--;
-          goto blockr0;
-        case 76:
-          LOWCACHE_DOWN;
-          a = _mm256_cmpeq_epi8(r0, zero);
-          r6 = (a & r7) | ((~ a) & r6);
-          s -= 2;
-          goto blockr7;
-      }
-blockr1:
-    }
-
-    // BLOCK r2
-    for (int i = 0; prog[i]; i++) {
-      switch (prog[i]) {
-        case 64:
-          r2 = zero;
-          s++;
-          goto blockr3;
-        case 65:
-          r2 = one;
-          s++;
-          goto blockr3;
-        case 66:
-          r2 = vecs[v];
-          s++;
-          goto blockr3;
-        case 67:
-          r1 = ~r1;
-          goto blockr2;
-        case 68:
-          r1 = (r1 << 1) & mask_fe;
-          goto blockr2;
-        case 69:
-          r1 = (r1 >> 1) & mask_7f;
-          goto blockr2;
-        case 70:
-          r1 = (r1 >> 2) & mask_3f;
-          goto blockr2;
-        case 71:
-          r1 = (r1 >> 4) & mask_0f;
-          goto blockr2;
-        case 72:
-          r0 = r0 & r1;
-          s--;
-          goto blockr1;
-        case 73:
-          r0 = r0 | r1;
-          s--;
-          goto blockr1;
-        case 74:
-          r0 = r0 ^ r1;
-          s--;
-          goto blockr1;
-        case 75:
-          r0 = __mm256_add_epi8(r0, r1);
-          s--;
-          goto blockr1;
-        case 76:
-          a = _mm256_cmpeq_epi8(r1, zero);
-          r7 = (a & r0) | ((~ a) & r7);
-          s -= 2;
-          goto blockr0;
-      }
-blockr2:
-    }
-
-    // BLOCK r3
-    for (int i = 0; prog[i]; i++) {
-      switch (prog[i]) {
-        case 64:
-          LOWCACHE_UP;
-          r3 = zero;
-          s++;
-          goto blockr4;
-        case 65:
-          LOWCACHE_UP;
-          r3 = one;
-          s++;
-          goto blockr4;
-        case 66:
-          LOWCACHE_UP;
-          r3 = vecs[v];
-          s++;
-          goto blockr4;
-        case 67:
-          r2 = ~r2;
-          goto blockr3;
-        case 68:
-          r2 = (r2 << 1) & mask_fe;
-          goto blockr3;
-        case 69:
-          r2 = (r2 >> 1) & mask_7f;
-          goto blockr3;
-        case 70:
-          r2 = (r2 >> 2) & mask_3f;
-          goto blockr3;
-        case 71:
-          r2 = (r2 >> 4) & mask_0f;
-          goto blockr3;
-        case 72:
-          r1 = r1 & r2;
-          s--;
-          goto blockr2;
-        case 73:
-          r1 = r1 | r2;
-          s--;
-          goto blockr2;
-        case 74:
-          r1 = r1 ^ r2;
-          s--;
-          goto blockr2;
-        case 75:
-          r1 = __mm256_add_epi8(r1, r2);
-          s--;
-          goto blockr2;
-        case 76:
-          a = _mm256_cmpeq_epi8(r2, zero);
-          r0 = (a & r1) | ((~ a) & r0);
-          s -= 2;
-          goto blockr1;
-      }
-blockr3:
-    }
-
-    // BLOCK r4
-    for (int i = 0; prog[i]; i++) {
-      switch (prog[i]) {
-        case 64:
-          r4 = zero;
-          s++;
-          goto blockr5;
-        case 65:
-          r4 = one;
-          s++;
-          goto blockr5;
-        case 66:
-          r4 = vecs[v];
-          s++;
-          goto blockr5;
-        case 67:
-          r3 = ~r3;
-          goto blockr4;
-        case 68:
-          r3 = (r3 << 1) & mask_fe;
-          goto blockr4;
-        case 69:
-          r3 = (r3 >> 1) & mask_7f;
-          goto blockr4;
-        case 70:
-          r3 = (r3 >> 2) & mask_3f;
-          goto blockr4;
-        case 71:
-          r3 = (r3 >> 4) & mask_0f;
-          goto blockr4;
-        case 72:
-          r2 = r2 & r3;
-          s--;
-          goto blockr3;
-        case 73:
-          r2 = r2 | r3;
-          s--;
-          goto blockr3;
-        case 74:
-          r2 = r2 ^ r3;
-          s--;
-          goto blockr3;
-        case 75:
-          r2 = __mm256_add_epi8(r2, r3);
-          s--;
-          goto blockr3;
-        case 76:
-          a = _mm256_cmpeq_epi8(r3, zero);
-          r1 = (a & r2) | ((~ a) & r1);
-          s -= 2;
-          goto blockr2;
-      }
-blockr4:
-    }
+    int i = 0;
+    REGBLOCK(r1, r0, r7, r6, r5, , LOCACHE_DN(s - 0), LOCACHE_DN(s - 0));
+    REGBLOCK(r2, r1, r0, r7, r6, , , LOCACHE_DN(s - 1));
+    REGBLOCK(r3, r2, r1, r0, r7, , , );
+    REGBLOCK(r4, r3, r2, r1, r0, HICACHE_UP(s - 3), , );
+    REGBLOCK(r5, r4, r3, r2, r1, , HICACHE_DN(s - 4), HICACHE_DN(s - 4));
+    REGBLOCK(r6, r5, r4, r3, r2, , , HICACHE_DN(s - 5));
+    REGBLOCK(r7, r6, r5, r4, r3, , , );
+    REGBLOCK(r0, r7, r6, r5, r4, LOCACHE_UP(s + 1), , );
 
     // copy result out
+    // should end with result in r0
+    sstack[0] = r0;
     for (int i = 0; i < 32; i++) {
-      res[v * 32 + i] = ((uint8_t*) stack)[i];
+      res[v * 32 + i] = ((uint8_t*) (&sstack[0]))[i];
     }
   }
 
