@@ -10,7 +10,7 @@
 #include "bv8.h"
 #include "hash.h"
 
-#define MAXLENGTH 9
+#define MAXLENGTH 8
 
 // table per size
 struct htab *sz[MAXLENGTH] = {0};
