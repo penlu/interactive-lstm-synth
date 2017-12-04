@@ -1,9 +1,11 @@
 // hash elements are 256 bytes only!
 
+#include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
 
 #include "hash.h"
+#include "immintrin.h"
 
 struct htab {
   size_t    ents; // number of entries
@@ -20,31 +22,26 @@ struct l {
 // we'll run out of memory long before overflowing,
 // so we can be careless about the mod
 uint64_t hash(uint8_t *res, uint64_t len) {
-  uint64_t h = 0;
+  uint64_t h = 5381;
   for (int i = 0; i < 256; i++) {
-    h = (h * 33 + res[i]) % len;
+    h = h * 33 + res[i];
   }
-  return h;
+  return h % len;
 }
 
 uint8_t *hash_lookup(struct htab *t, uint8_t *res) {
   size_t ents = t->ents;
   struct l **table = t->tab;
 
-  uint64_t h = hash(res, ents);
+  uint64_t h = hash(res, ents - 1);
 
   struct l *head = table[h];
   while (head) {
     // compare entry
-    for (int i = 0; i < 256; i++) {
-      if (head->data[i] != res[i]) {
-        goto fail;
-      }
+    if (!memcmp(head->data, res, 256)) {
+      return head->data;
     }
 
-    return head->data;
-
-fail:
     head = head->next;
   }
 
@@ -56,21 +53,21 @@ void hash_insert(struct htab *t, uint8_t *res) {
   struct l **table = t->tab;
 
   // time to expand table?
-  if (t->ctr >= ents * 8) {
+  if (t->ctr >= ents * 4) {
     // allocate new entries
     size_t new_ents = ents * 2;
-    struct l **new_tab = calloc(new_ents, sizeof(struct l *));
+    struct l **new_tab = calloc(new_ents - 1, sizeof(struct l *));
 
     t->ents = new_ents;
     t->tab = new_tab;
 
-    // copy over the old entries
-    for (size_t i = 0; i < ents; i++) {
+    // move over the old entries
+    for (size_t i = 0; i < ents - 1; i++) {
       struct l *head = table[i];
       while (head) {
         struct l *next = head->next;
 
-        uint64_t h = hash(head->data, new_ents);
+        uint64_t h = hash(head->data, new_ents - 1);
         head->next = new_tab[h];
         new_tab[h] = head;
 
@@ -84,11 +81,9 @@ void hash_insert(struct htab *t, uint8_t *res) {
   }
 
   // insert new entry
-  uint64_t h = hash(res, ents);
+  uint64_t h = hash(res, ents - 1);
   struct l *new = malloc(sizeof(struct l));
-  for (int i = 0; i < 256; i++) {
-    new->data[i] = res[i];
-  }
+  memcpy(new->data, res, 256);
   new->next = t->tab[h];
   t->tab[h] = new;
 
@@ -100,7 +95,7 @@ struct htab *hash_init() {
   struct htab *t = malloc(sizeof(struct htab));
   t->ents = HASHINITSIZE;
   t->ctr = 0;
-  t->tab = calloc(HASHINITSIZE, sizeof(struct l *));
+  t->tab = calloc(HASHINITSIZE - 1, sizeof(struct l *));
   return t;
 }
 
