@@ -104,9 +104,6 @@ fail:
   size_t new_ents = ents * 2;
   uint8_t *new_tab = calloc(new_ents, 256);
   uint64_t *new_occ = calloc(new_ents / 64, sizeof(uint64_t));
-  for (int i = 0; i < new_ents / 64; i++) {
-    new_occ[i] = 0;
-  }
   t->ents = new_ents;
   t->tab = new_tab;
   t->occ = new_occ;
@@ -114,7 +111,7 @@ fail:
   // copy over the old entries
   for (size_t i = 0; i < ents; i++) {
     if (hash_getocc(occ, i)) {
-      uint8_t *loc = &(table[h * 256]);
+      uint8_t *loc = &(table[i * 256]);
       hash_insert(t, loc);
     }
   }
