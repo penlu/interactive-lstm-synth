@@ -48,12 +48,16 @@ int main(int argc, char **argv) {
     int     sess_id;        // session ID
     uint8_t **sess_vec;     // session behavior vector
 
+    fflush(stdout);
+
     char c = getchare();
 
     // SESSION OPEN
     if (c == 1) {
       // desired session ID
       sess_id = readint();
+
+      c = getchare(); // should be STX
 
       // get target program
       readprog(prog_buf, sizeof(prog_buf));
@@ -76,6 +80,8 @@ int main(int argc, char **argv) {
       // desired session ID
       sess_id = readint();
 
+      c = getchare(); // should be NUL
+
       sess_vec = sess_lookup(sess_id);
       for (int i = 0; i < 256; i++) {
         putchar((*sess_vec)[i]);
@@ -86,6 +92,8 @@ int main(int argc, char **argv) {
     } else if (c == 3) {
       // desired session ID
       sess_id = readint();
+
+      c = getchare(); // should be STX
       
       // get target program
       readprog(prog_buf, sizeof(prog_buf));
@@ -112,24 +120,37 @@ int main(int argc, char **argv) {
 
       // compare to session vector storage structure
       // store erroneous output
+      // count number of bits correct!
       int     err_num = 0;
-      uint8_t err_out[256];
+      uint8_t err_out[768];
+      uint16_t wrong = 0;
       for (int i = 0; i < 256; i++) {
         if ((*sess_vec)[i] != res[i]) {
           err_out[err_num++] = i;
+          err_out[err_num++] = (*sess_vec)[i];
+          err_out[err_num++] = res[i];
         }
+
+        uint8_t v = ((*sess_vec)[i] ^ res[i]);
+        wrong += (v * 0x200040008001ULL & 0x111111111111111ULL) % 0xf;
       }
 
-      if (err_num != 0) {
-        // randomly select an erroneous output
-        int i = rand_uniform(err_num);
-        putchar('#');
-        putchar(i);
-        putchar((*sess_vec)[i]);
-        putchar(res[i]);
+      if (err_num == 0) {
+        putchar(0);
+        continue;
       }
 
-      // in any case...
+      // output all errors
+      putchar('#');
+      putchar(err_num / 3);
+      for (int i = 0; i < err_num; i++) {
+        printf("%s", err_out);
+      }
+
+      // output bitset count
+      putchar(wrong >> 8);
+      putchar(wrong & 0xff);
+
       putchar(0);
     }
   }
