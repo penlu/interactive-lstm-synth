@@ -93,7 +93,6 @@ class Encoder(nn.Module):
         if variable_length==False:
             #seq_len = inputs.size()[0]
             embedded = self.embedding(inputs.view(1, 1)).view(1,1,-1)
-            #print("Embedded", embedded)
             output, hidden = self.rnn(embedded, hidden)
 
         elif variable_length==True:
@@ -204,7 +203,6 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         
         # select next decoder input
         next_i = choice_policy(decoder_output)
-        #print next_i
         
         decoder_input = Variable(torch.LongTensor([[next_i]]).cuda(), requires_grad=False)
 
@@ -251,6 +249,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
             return scores_so_far
         
         scores_so_far.append(score)
+        print new_example
         inputs += new_example
         #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
         #input_length += new_example.size()[0]
@@ -264,6 +263,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         
         # produce encoder output on current input sequence
         for ei in range(len(inputs)):
+            #print inputs[ei]
             encoder_output, encoder_hidden = encoder(inputs[ei], encoder_hidden)
             #encoder_outputs[ei] = encoder_output[0][0]
         
@@ -283,6 +283,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
             return scores_so_far
         
         scores_so_far.append(score)
+        print new_example
         inputs += new_example
         #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
         #input_length += new_example.size()[0]
@@ -318,7 +319,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     rollout_hiddens = [] # rollout_hiddens[t] = Y_1:t-1
     rollout_outputs = [] # rollout_outputs[t] = G(y_t | Y_1:t-1)
     rollout_selected = [] # rollout_selected[t] = y_t
-    rollout_inputs = input_sequence
+    rollout_inputs = input_sequence # stuff what goes to the encoder
     init_input_len = len(input_sequence)
 
     # perform a single full unroll
@@ -360,6 +361,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
+            print [x.data.cpu().numpy()[0] for x in rollout_inputs[:init_input_len + interactions]]
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
                                     rollout_hiddens[t], Variable(torch.LongTensor([[rollout_selected[t]]]).cuda(), requires_grad=False), inter_prefix[:],
