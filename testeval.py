@@ -32,7 +32,7 @@ for i in range(N):
 opened = time.time() - start
 
 for i in order:
-  test.cand_query(randos[i], progs[i])
+  assert test.cand_query(randos[i], progs[i]) == (100000.)
 
 done = time.time() - start
 
@@ -42,3 +42,15 @@ print "done after "
 print done
 
 print test.read_odom()
+
+order = random.sample(range(N), N)
+
+queries = []
+for i in range(N):
+  queries += [test.eval_init(progs[i])]
+
+for i in order:
+  assert queries[i](progs[i]) == (100000.)
+
+for i in range(4):
+  print queries[order[i]](progs[i])

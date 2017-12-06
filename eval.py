@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import random
 import struct
 import time
 
@@ -79,24 +80,35 @@ class Evaluator:
       # stack underflow during execution, at position...
       pos = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
-      return ('!', pos)
+      #return ('!', pos)
+      return (-30., ('!', pos))
     elif res == '?':
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
-      return ('?', cnt)
+      #return ('?', cnt)
+      return (-30., ('?', cnt))
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
+      #print cnt
+      # handle overflows on remote end
+      if cnt == 0:
+        cnt = 256
       resp = os.read(self.fr_eval, cnt * 3)
       wrong = ord(os.read(self.fr_eval, 1))*256 + ord(os.read(self.fr_eval, 1))
 
       # list of incorrect results
       assert os.read(self.fr_eval, 1) == NUL
-      return ('#', [(ord(resp[cnt * 3]), ord(resp[cnt * 3 + 1]), ord(resp[cnt * 3 + 2])) for i in range(cnt)], wrong)
+      #return ('#', [(ord(resp[cnt * 3]), ord(resp[cnt * 3 + 1]), ord(resp[cnt * 3 + 2])) for i in range(cnt)], wrong)
+
+      samp = random.randint(0, cnt - 1)
+      # input, incorrect, correct
+      return (float(2048 - wrong) / 80, (ord(resp[samp * 3]), ord(resp[samp * 3 + 2]), ord(resp[samp * 3 + 1])))
     elif res == NUL:
       # no errors, we're done!
-      return ()
+      #return ()
+      return (100000.)
 
   def _candquery(self, ID):
     def inner(prog):
@@ -108,7 +120,7 @@ class Evaluator:
     self.sess_open(self.sesscount, prog)
     self.sesscount += 1
 
-    return self._candquery(ID)
+    return self._candquery(self.sesscount - 1)
 
   def read_odom(self):
     avg = self.tottime / self.odometer

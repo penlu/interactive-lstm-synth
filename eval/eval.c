@@ -142,9 +142,9 @@ int main(int argc, char **argv) {
 
       // output all errors
       putchar('#');
-      putchar(err_num / 3);
+      putchar((uint8_t) (err_num / 3));
       for (int i = 0; i < err_num; i++) {
-        printf("%s", err_out);
+        putchar(err_out[i]);
       }
 
       // output bitset count
