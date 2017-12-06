@@ -90,14 +90,18 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
-      return (-30., torch.LongTensor([[20], [int(pos)/8+2], [int(pos)%8+2]]))
+      return (-30., [torch.LongTensor([20]),
+                     torch.LongTensor([int(pos)/8+2]),
+                     torch.LongTensor([int(pos)%8+2]]))
     elif res == '?':
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
-      return (-30., torch.LongTensor([[21], [int(cnt)/8+2], [int(pos)%8+2]]))
+      return (-30., [torch.LongTensor([21]),
+                     torch.LongTensor([int(cnt)/8+2]),
+                     torch.LongTensor([int(pos)%8+2]]))
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
@@ -115,9 +119,9 @@ class Evaluator:
       samp = random.randint(0, cnt - 1)
       # input, correct, incorrect
       retval = (ord(resp[samp * 3]), ord(resp[samp * 3 + 1]), ord(resp[samp * 3 + 2]))
-      tenret = torch.LongTensor([[retval[0]/8+2], [retval[0]%8+2], [18],
-                                 [retval[1]/8+2], [retval[1]%8+2], [18],
-                                 [retval[2]/8+2], [retval[2]%8+2], [19]])
+      tenret = [torch.LongTensor(x) for x in [[retval[0]/8+2], [retval[0]%8+2], [18],
+                                              [retval[1]/8+2], [retval[1]%8+2], [18],
+                                              [retval[2]/8+2], [retval[2]%8+2], [19]]]
       return (float(2048 - wrong) / 80 - 30, tenret)
     elif res == NUL:
       # no errors, we're done!

@@ -186,15 +186,17 @@ class Decoder(nn.Module):
 
 
 # generate a program with max_length
-# the argument "generate" contains some program prefix
-def gen_prog(start_hidden, decoder, generate, hiddens, outputs, selected, choice_policy, max_length):
+# the argument "prefix" contains some program prefix: we produce the rest
+# encoder intermediate states saved as desired, for rollout purposes
+def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selected, choice_policy, max_length):
     # initialize decoder values
     decoder_hidden = start_hidden
-    decoder_input = Variable(torch.LongTensor([[SOS]])) # starting token has to be SOS
+    decoder_input = start_input
 
-    for di in range(max_length - len(generate)):
+    for di in range(max_length - len(prefix)):
+        # recall decoder hidden state for future rollout
+        hiddens.append(decoder_hidden)
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-        #decoder_outputs.append(decoder_output) # stores the "generator probability"
         
         # select next decoder input
         selectv, selecti = choice_policy(decoder_output)
@@ -203,79 +205,70 @@ def gen_prog(start_hidden, decoder, generate, hiddens, outputs, selected, choice
         decoder_input = Variable(torch.LongTensor([[next_i]]))
 
         # save decoder behaviors
-        hiddens.append(decoder_hidden)
         outputs.append(decoder_output)
         selected.append(next_i)
-        generate.append(next_i)
+        prefix.append(next_i)
 
         if next_i == EOS:
-            #decoder_selected[di+1:,0] = next_i
             break
     else:
         # hit it with the fact that it's over---not the previous output
-        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]])), decoder_hidden)
         hiddens.append(decoder_hidden)
+        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]])), decoder_hidden)
         outputs.append(decoder_output)
         selected.append(EOS)
-        generate.append(EOS)
+        prefix.append(EOS)
 
-    return generate
+    return prefix, decoder_hidden
 
 # rollout from some prefix
 # rest_interactions is the number of interactions remaining
 # scores contains the score values produced in all past interaction sessions
 # prefix is the generated program symbols if we're in the middle of generating a program
 # hiddens, output, selected will accumulate those values: don't use this for monte carlo
+# inputs is the inputs we've accumulated in this rollout, for encoder use
 # choice is the choice function: max or multinomial sampling, typically
-def unroll(rest_interactions, f, scores, start_hidden, prefix, hiddens, outputs, selected, choice):
+def unroll(rest_interactions, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, inputs, selected, choice):
     if len(prefix) != 0:
         # in the middle of generating a program
         # finish up this round...
 
-        hiddens.append(start_hidden)
-
-        generate = gen_prog(start_hidden, decoder, prefix,
+        # get generated program
+        # recall decoder hidden state for next encoder round
+        generate, encoder_hidden = gen_prog(start_hidden, start_input, decoder, prefix,
                     hiddens, outputs, selected,
                     choice, max_out_seq_len)
 
-        # recall decoder hidden state for next encoder round
-        encoder_hidden = decoder_hidden
-
         # evaluator interaction
-        #pred_list = decoder_selected.data.numpy()
-        score, new_example = f(generate) #f(pred_list.tolist())
+        score, new_example = f(generate)
 
         # correct program signalled
         if score == 100000:
-            return scores
+            return scores_so_far
         
-        scores.append(score)
-        inputs[ei+1:ei+1+new_example.size()[0]] = new_example
-        input_length += new_example.size()[0]
+        scores_so_far.append(score)
+        inputs += new_example
+        #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
+        #input_length += new_example.size()[0]
+        #lengths += [input_length]
 
         rest_interactions -= 1
     else:
         encoder_hidden = start_hidden
 
     for i in range(rest_interactions):
-        # recall decoder hidden state for future rollout
-        hiddens.append(encoder_hidden)
         
         # produce encoder output on current input sequence
-        for ei in range(input_length):
+        for ei in range(len(inputs)):
             encoder_output, encoder_hidden = encoder(inputs[ei], encoder_hidden)
-            encoder_outputs[ei] = encoder_output[0][0]
+            #encoder_outputs[ei] = encoder_output[0][0]
         
-        #decoder_hiddens = Variable(torch.zeros(max_out_seq_length, decoder.hidden_size)) # max_length
-        #decoder_outputs = Variable(torch.zeros(max_out_seq_length, decoder.vocab_size)) # set of output distributions
-        #decoder_selected = Variable(torch.zeros(max_out_seq_length, 1)) # max_length + 1 to account for start-of-seq token
-
-        generate = gen_prog(encoder_hidden, decoder, [],
+        # get generated program
+        # recall decoder hidden state for next encoder round
+        generate, encoder_hidden = gen_prog(
+                    encoder_hidden, Variable(torch.LongTensor([[SOS]]), decoder, [],
                     hiddens, outputs, selected,
                     choice, max_out_seq_len)
-
-        # recall decoder hidden state for next encoder round
-        encoder_hidden = decoder_hidden
 
         # evaluator interaction
         #pred_list = decoder_selected.data.numpy()
@@ -283,13 +276,14 @@ def unroll(rest_interactions, f, scores, start_hidden, prefix, hiddens, outputs,
 
         # correct program signalled
         if score == 100000:
-            break
+            return scores_so_far
         
-        scores.append(score)
-        inputs[ei+1:ei+1+new_example.size()[0]] = new_example
-        input_length += new_example.size()[0]
+        scores_so_far.append(score)
+        inputs += new_example
+        #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
+        #input_length += new_example.size()[0]
 
-    return scores
+    return scores_so_far
 
 #learning_rate = 0.01
 #encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
@@ -298,17 +292,17 @@ def unroll(rest_interactions, f, scores, start_hidden, prefix, hiddens, outputs,
 # create encoder outputs
 # given some input sequence - input
 
-# a single input sequence, a single target output sequence, and we run a training epoch
-def train_epoch(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
+# a single input sequence, a single target output sequence, and we run
+def train_single(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
-    input_length = input_sequence.size()[0]
+    #input_length = input_sequence.size()[0]
     #target_length = max_out_seq_len #target_sequence.size()[0]
 
-    encoder_outputs = Variable(torch.zeros(max_in_seq_length, encoder.hidden_size))
-    inputs = Variable(torch.zeros(max_seq_length))
-    inputs[:input_length] = input_sequence
+    #encoder_outputs = Variable(torch.zeros(max_in_seq_length, encoder.hidden_size))
+    #inputs = Variable(torch.zeros(max_seq_length))
+    #inputs[:input_length] = input_sequence
 
     # initial encoder hidden input: zero
     encoder_hidden = Variable(torch.zeros(encoder.hidden_size))
@@ -321,29 +315,38 @@ def train_epoch(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LE
 
     # save intermediate hidden states, output multinomials, selected outputs for future rollout
     rollout_hiddens = [] # rollout_hiddens[t] = Y_1:t-1
-    rollout_outputs = []
-    rollout_selected = []
+    rollout_outputs = [] # rollout_outputs[t] = G(y_t | Y_1:t-1)
+    rollout_selected = [] # rollout_selected[t] = y_t
+    rollout_inputs = input_sequence
+    init_input_len = len(input_sequence)
 
     # perform a single full unroll
-    final_sample_scores = unroll(MAX_INTERACTIONS, f, scores, encoder_hidden, [], rollout_hiddens, rollout_outputs, rollout_selected, lambda x: x.data.topk(1))
+    final_sample_scores = unroll(MAX_INTERACTIONS, f, scores,
+                                encoder_hidden, Variable(torch.LongTensor([[SOS]])), [],
+                                rollout_hiddens, rollout_outputs, rollout_selected,
+                                rollout_inputs,
+                                lambda x: x.data.topk(1))
     final_sample_est = discriminator(final_sample_scores)
 
     assert len(rollout_hiddens) == len(rollout_outputs)
     assert len(rollout_outputs) == len(rollout_selected)
 
-    inter_scores = []
+    # intermediate score array, intermediate prefix array
+    #inter_scores = []
     inter_prefix = []
     interactions = 0 # count of interactions we've had so far in this rollout
     #tokens_already = 0 # if we're in the middle of an instance
 
     # perform MC rollout to estimate final RL reward, in the style of SeqGAN
-    J = rollout_outputs[-1] * final_sample_est
+    #J = rollout_outputs[-1] * final_sample_est # accounted for by last loop
     for t in range(len(rollout_hiddens)):
+
+        inter_prefix += rollout_selected[t]
 
         if rollout_selected[t] == EOS:
             interactions += 1
             #tokens_already = 0
-            inter_scores.append(scores[interactions - 1])
+            #inter_scores.append(scores[interactions - 1])
             inter_prefix = []
 
         sample_est = 0.
@@ -352,8 +355,10 @@ def train_epoch(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LE
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            sample_scores = unroll(MAX_INTERACTIONS - interactions, f, inter_scores[:],
-                                    rollout_hiddens[t], inter_prefix[:], [], [], [],
+            sample_scores = unroll(MAX_INTERACTIONS - interactions, f, scores[:interactions],
+                                    rollout_hiddens[t], rollout_outputs[t], inter_prefix[:],
+                                    [], [], [],
+                                    rollout_inputs[:init_input_len + interactions],
                                     lambda x: torch.multinomial(torch.exp(x), 1))
             sample_est += discriminator(sample_scores)
 
