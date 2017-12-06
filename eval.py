@@ -90,9 +90,10 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
+      print pos
       return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[20],
-                     [int(pos)/8+2],
-                     [int(pos)%8+2],
+                     [int(pos)/16+2],
+                     [int(pos)%16+2],
                      [1]]])
     elif res == '?':
       # stack overflow at termination, count...
@@ -100,9 +101,10 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
+      print cnt
       return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[21],
-                     [int(cnt)/8+2],
-                     [int(cnt)%8+2],
+                     [int(cnt)/16+2],
+                     [int(cnt)%16+2],
                      [1]]])
     elif res == '#':
       # incorrect outputs
@@ -121,9 +123,10 @@ class Evaluator:
       samp = random.randint(0, cnt - 1)
       # input, correct, incorrect
       retval = (ord(resp[samp * 3]), ord(resp[samp * 3 + 1]), ord(resp[samp * 3 + 2]))
-      tenret = [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[retval[0]/8+2], [retval[0]%8+2], [18],
-                                              [retval[1]/8+2], [retval[1]%8+2], [18],
-                                              [retval[2]/8+2], [retval[2]%8+2], [19], [1]]]
+      thearr = [[retval[0]/16+2], [retval[0]%16+2], [18],
+                [retval[1]/16+2], [retval[1]%16+2], [18],
+                [retval[2]/16+2], [retval[2]%16+2], [19], [1]]
+      tenret = [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in thearr]
       return (float(2048 - wrong) / 80 - 30, tenret)
     elif res == NUL:
       # no errors, we're done!

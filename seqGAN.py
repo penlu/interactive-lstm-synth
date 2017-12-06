@@ -249,7 +249,6 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
             return scores_so_far
         
         scores_so_far.append(score)
-        print new_example
         inputs += new_example
         #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
         #input_length += new_example.size()[0]
@@ -263,7 +262,6 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         
         # produce encoder output on current input sequence
         for ei in range(len(inputs)):
-            #print inputs[ei]
             encoder_output, encoder_hidden = encoder(inputs[ei], encoder_hidden)
             #encoder_outputs[ei] = encoder_output[0][0]
         
@@ -283,7 +281,6 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
             return scores_so_far
         
         scores_so_far.append(score)
-        print new_example
         inputs += new_example
         #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
         #input_length += new_example.size()[0]
