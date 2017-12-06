@@ -24,9 +24,9 @@ EOS = 1
 
 
 MAX_IN_SEQ_LEN = 150
-MAX_OUT_SEQ_LEN = 40
-MAX_INTERACTIONS = 10
-MONTE_CARLO_N = 16
+MAX_OUT_SEQ_LEN = 24
+MAX_INTERACTIONS = 4
+MONTE_CARLO_N = 2
 class Encoder(nn.Module):
     r"""
     Embeds an input sequence (in our case consisting of input-output pairs)
@@ -348,6 +348,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             interactions += 1
             #tokens_already = 0
             #inter_scores.append(scores[interactions - 1])
+            last_inter_prefix = inter_prefix
             inter_prefix = []
 
         sample_est = 0.
@@ -368,7 +369,9 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         sample_est = sample_est / MONTE_CARLO_N
         
-        J += rollout_outputs[t] * sample_est
+        J += rollout_outputs[t][0][rollout_selected[t]] * sample_est
+
+    print last_inter_prefix
 
     J.backward()
 
@@ -378,12 +381,10 @@ def discriminator(scores):
     return sum(scores)
 
 
-encoder = Encoder(22, 50, 50, 3).cuda()
-decoder = Decoder(14, 50, num_layers=3).cuda()
+encoder = Encoder(22, 100, 100, 3).cuda()
+decoder = Decoder(14, 100, num_layers=3).cuda()
 
-learning_rate = 0.01
-encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
-decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
+learning_rate = 0.1
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
@@ -398,5 +399,13 @@ inseq = [Variable(torch.LongTensor([x]).cuda(), requires_grad=False) for x in [S
                                                             2, 4, 18, 3, 7, 19,
                                                             2, 5, 19, 3, 15, 19, EOS]]
 
-train_single(encoder, decoder, inseq, "BCDCDCDC")
+encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
+decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
+for i in range(100):
+    print "EPOCH %s" % str(i)
+    encoder_optimizer.zero_grad()
+    decoder_optimizer.zero_grad()
+    train_single(encoder, decoder, inseq, "BCDCDCDC")
+    encoder_optimizer.step()
+    decoder_optimizer.step()
 
