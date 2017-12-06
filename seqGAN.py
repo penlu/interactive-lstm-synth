@@ -1,8 +1,12 @@
 
 # coding: utf-8
+
+from eval import Evaluator
+
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
+import time
 
 import torch
 import torch.autograd as autograd
@@ -60,9 +64,9 @@ class Encoder(nn.Module):
         self.embedding = nn.Embedding(self.vocab_dim, self.embedding_dim)
         self.type = rnn
         if rnn=='LSTM':
-            self.rnn = nn.LSTM(self.embedding_dim, self.hidden_dim, self.num_layers)
-        elif rnn=='GRU':
-            self.rnn = nn.GRU(self.embedding_dim, self.hidden_dim, self.num_layers)
+            self.rnn = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim, num_layers=self.num_layers, dropout=0.3)
+        #elif rnn=='GRU':
+            #self.rnn = nn.GRU(self.embedding_dim, self.hidden_dim, self.num_layers, dropout=0.3)
 
         else:
             raise("not implemented")
@@ -87,9 +91,9 @@ class Encoder(nn.Module):
         """
 
         if variable_length==False:
-            seq_len = inputs.size()[0]
-            embedded = self.embedding(inputs).view(seq_len,batch_size,-1)
-            print("Embedded", embedded)
+            #seq_len = inputs.size()[0]
+            embedded = self.embedding(inputs.view(1, 1)).view(1,1,-1)
+            #print("Embedded", embedded)
             output, hidden = self.rnn(embedded, hidden)
 
         elif variable_length==True:
@@ -113,8 +117,8 @@ class Encoder(nn.Module):
         """
         if self.type == 'LSTM':
             # dim = [num_layers*num_directions, batch, hidden_size]
-            h0 = torch.Tensor(self.num_layers, 1, self.hidden_dim)
-            c0 = torch.Tensor(self.num_layers, 1, self.hidden_dim)
+            h0 = torch.Tensor(self.num_layers, 1, self.hidden_dim).cuda()
+            c0 = torch.Tensor(self.num_layers, 1, self.hidden_dim).cuda()
 
             # initializations
             h0, c0 = init.xavier_normal(h0), init.xavier_normal(c0)
@@ -143,12 +147,12 @@ class Decoder(nn.Module):
         self.embedding = nn.Embedding(vocab_dim, hidden_dim)
         self.type = rnn
         if self.type=='LSTM':
-            self.rnn = nn.LSTM(self.hidden_dim, self.hidden_dim, self.num_layers)
-        elif self.type=='GRU':
-            self.rnn = nn.GRU(self.hidden_dim, self.hidden_dim, self.num_layers)
+            self.rnn = nn.LSTM(input_size=self.hidden_dim, hidden_size=self.hidden_dim, num_layers=self.num_layers, dropout=0.3)
+        #elif self.type=='GRU':
+        #    self.rnn = nn.GRU(self.hidden_dim, self.hidden_dim, self.num_layers)
         self.out = nn.Linear(hidden_dim, vocab_dim)
         
-    def forward(self, input, hidden):
+    def forward(self, inputs, hidden):
         r"""
         Creates forward graph.
         
@@ -156,7 +160,7 @@ class Decoder(nn.Module):
             1. input (1,1): if no teacher_forcing, this corresponds to the last output of the RNN
             2. hidden : previous hidden layer state
         """
-        output = self.embedding(input).view(1,1,-1)
+        output = self.embedding(inputs).view(1,1,-1)
         outputs_dict = {}
         for i in range(self.num_layers):
             #output = F.relu(inp) # not necessary
@@ -199,10 +203,10 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
         
         # select next decoder input
-        selectv, selecti = choice_policy(decoder_output)
-        next_i = selecti[0][0]
+        next_i = choice_policy(decoder_output)
+        #print next_i
         
-        decoder_input = Variable(torch.LongTensor([[next_i]]).cuda())
+        decoder_input = Variable(torch.LongTensor([[next_i]]).cuda(), requires_grad=False)
 
         # save decoder behaviors
         outputs.append(decoder_output)
@@ -214,7 +218,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
     else:
         # hit it with the fact that it's over---not the previous output
         hiddens.append(decoder_hidden)
-        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]]).cuda()), decoder_hidden)
+        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]]).cuda(), requires_grad=False), decoder_hidden)
         outputs.append(decoder_output)
         selected.append(EOS)
         prefix.append(EOS)
@@ -228,7 +232,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
 # hiddens, output, selected will accumulate those values: don't use this for monte carlo
 # inputs is the inputs we've accumulated in this rollout, for encoder use
 # choice is the choice function: max or multinomial sampling, typically
-def unroll(encoder, decoder, rest_interactions, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, inputs, selected, choice):
+def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, selected, inputs, choice):
     if len(prefix) != 0:
         # in the middle of generating a program
         # finish up this round...
@@ -266,7 +270,7 @@ def unroll(encoder, decoder, rest_interactions, f, scores_so_far, start_hidden, 
         # get generated program
         # recall decoder hidden state for next encoder round
         generate, encoder_hidden = gen_prog(
-                    encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), decoder, [],
+                    encoder_hidden, Variable(torch.LongTensor([[SOS]]), requires_grad=False).cuda(), decoder, [],
                     hiddens, outputs, selected,
                     choice, max_out_seq_len)
 
@@ -298,7 +302,11 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #inputs[:input_length] = input_sequence
 
     # initial encoder hidden input: zero
-    encoder_hidden = Variable(torch.zeros(encoder.hidden_size)).cuda()
+    #encoder_hidden = Variable(torch.zeros(encoder.hidden_dim)).cuda()
+    #encoder_h0 = Variable(torch.zeros(encoder.num_layers, 1, encoder.hidden_dim).cuda())
+    #encoder_c0 = Variable(torch.zeros(encoder.num_layers, 1, encoder.hidden_dim).cuda())
+    #encoder_hidden = (encoder_h0, encoder_c0)
+    encoder_hidden = encoder.init_hidden()
     
     e = Evaluator()
     f = e.eval_init(target_sequence)
@@ -314,11 +322,12 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     init_input_len = len(input_sequence)
 
     # perform a single full unroll
-    final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, f, scores,
-                                encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda()), [],
+    final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
+                                f, scores,
+                                encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), requires_grad=False), [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
                                 rollout_inputs,
-                                lambda x: x.data.topk(1))
+                                lambda x: x.data.topk(1)[1][0][0])
     final_sample_est = discriminator(final_sample_scores)
 
     assert len(rollout_hiddens) == len(rollout_outputs)
@@ -334,7 +343,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #J = rollout_outputs[-1] * final_sample_est # accounted for by last loop
     for t in range(len(rollout_hiddens)):
 
-        inter_prefix += rollout_selected[t]
+        inter_prefix += [rollout_selected[t]]
 
         if rollout_selected[t] == EOS:
             interactions += 1
@@ -344,15 +353,19 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         sample_est = 0.
         for g in range(MONTE_CARLO_N):
+            print "carlo"
+            print g
+            #time.sleep(5)
             # generate an output sequence
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, f, scores[:interactions],
-                                    rollout_hiddens[t], rollout_outputs[t], inter_prefix[:],
+            sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
+                                    f, scores[:interactions],
+                                    rollout_hiddens[t], Variable(torch.LongTensor([[rollout_selected[t]]]).cuda(), requires_grad=False), inter_prefix[:],
                                     [], [], [],
                                     rollout_inputs[:init_input_len + interactions],
-                                    lambda x: torch.multinomial(torch.exp(x), 1))
+                                    lambda x: torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0])
             sample_est += discriminator(sample_scores)
 
         sample_est = sample_est / MONTE_CARLO_N
@@ -363,11 +376,29 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
     return J
 
+def discriminator(scores):
+    return sum(scores)
+
+
+encoder = Encoder(22, 50, 50, 3).cuda()
+decoder = Decoder(14, 50, num_layers=3).cuda()
 
 learning_rate = 0.01
 encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
-teacher_forcing_ratio = 0.3
+#teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
+
+# 050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd
+
+torch.cuda.device(0)
+
+inseq = [Variable(torch.LongTensor([x]).cuda(), requires_grad=False) for x in [SOS,
+                                                            2, 2, 18, 2, 7, 19,
+                                                            2, 3, 18, 2, 15, 19,
+                                                            2, 4, 18, 3, 7, 19,
+                                                            2, 5, 19, 3, 15, 19, EOS]]
+
+train_single(encoder, decoder, inseq, "BCDCDCDC")
 

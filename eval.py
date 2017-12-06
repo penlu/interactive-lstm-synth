@@ -90,18 +90,20 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
-      return (-30., [torch.LongTensor([20]),
-                     torch.LongTensor([int(pos)/8+2]),
-                     torch.LongTensor([int(pos)%8+2]]))
+      return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[20],
+                     [int(pos)/8+2],
+                     [int(pos)%8+2],
+                     [1]]])
     elif res == '?':
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
-      return (-30., [torch.LongTensor([21]),
-                     torch.LongTensor([int(cnt)/8+2]),
-                     torch.LongTensor([int(pos)%8+2]]))
+      return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[21],
+                     [int(cnt)/8+2],
+                     [int(cnt)%8+2],
+                     [1]]])
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
@@ -119,9 +121,9 @@ class Evaluator:
       samp = random.randint(0, cnt - 1)
       # input, correct, incorrect
       retval = (ord(resp[samp * 3]), ord(resp[samp * 3 + 1]), ord(resp[samp * 3 + 2]))
-      tenret = [torch.LongTensor(x) for x in [[retval[0]/8+2], [retval[0]%8+2], [18],
+      tenret = [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[retval[0]/8+2], [retval[0]%8+2], [18],
                                               [retval[1]/8+2], [retval[1]%8+2], [18],
-                                              [retval[2]/8+2], [retval[2]%8+2], [19]]]
+                                              [retval[2]/8+2], [retval[2]%8+2], [19], [1]]]
       return (float(2048 - wrong) / 80 - 30, tenret)
     elif res == NUL:
       # no errors, we're done!
@@ -129,14 +131,16 @@ class Evaluator:
       return (100000., torch.LongTensor([[1]]))
 
   def _candquery(self, ID):
+    lookup = [chr(0), chr(0), '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
     def inner(prog):
-      print prog
+      prog = "".join([lookup[x] for x in prog])
+      #print prog
       return self.cand_query(ID, prog)
 
     return inner
 
   def eval_init(self, prog):
-    print prog
+    #print prog
     self.sess_open(self.sesscount, prog)
     self.sesscount += 1
 
