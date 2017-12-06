@@ -202,7 +202,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         selectv, selecti = choice_policy(decoder_output)
         next_i = selecti[0][0]
         
-        decoder_input = Variable(torch.LongTensor([[next_i]]))
+        decoder_input = Variable(torch.LongTensor([[next_i]]).cuda())
 
         # save decoder behaviors
         outputs.append(decoder_output)
@@ -214,7 +214,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
     else:
         # hit it with the fact that it's over---not the previous output
         hiddens.append(decoder_hidden)
-        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]])), decoder_hidden)
+        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]]).cuda()), decoder_hidden)
         outputs.append(decoder_output)
         selected.append(EOS)
         prefix.append(EOS)
@@ -228,7 +228,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
 # hiddens, output, selected will accumulate those values: don't use this for monte carlo
 # inputs is the inputs we've accumulated in this rollout, for encoder use
 # choice is the choice function: max or multinomial sampling, typically
-def unroll(rest_interactions, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, inputs, selected, choice):
+def unroll(encoder, decoder, rest_interactions, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, inputs, selected, choice):
     if len(prefix) != 0:
         # in the middle of generating a program
         # finish up this round...
@@ -266,7 +266,7 @@ def unroll(rest_interactions, f, scores_so_far, start_hidden, start_input, prefi
         # get generated program
         # recall decoder hidden state for next encoder round
         generate, encoder_hidden = gen_prog(
-                    encoder_hidden, Variable(torch.LongTensor([[SOS]]), decoder, [],
+                    encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), decoder, [],
                     hiddens, outputs, selected,
                     choice, max_out_seq_len)
 
@@ -285,15 +285,8 @@ def unroll(rest_interactions, f, scores_so_far, start_hidden, start_input, prefi
 
     return scores_so_far
 
-#learning_rate = 0.01
-#encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
-#decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
-#teacher_forcing_ratio = 0.3
-# create encoder outputs
-# given some input sequence - input
-
 # a single input sequence, a single target output sequence, and we run
-def train_single(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
+def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
@@ -305,7 +298,7 @@ def train_single(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_L
     #inputs[:input_length] = input_sequence
 
     # initial encoder hidden input: zero
-    encoder_hidden = Variable(torch.zeros(encoder.hidden_size))
+    encoder_hidden = Variable(torch.zeros(encoder.hidden_size)).cuda()
     
     e = Evaluator()
     f = e.eval_init(target_sequence)
@@ -321,8 +314,8 @@ def train_single(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_L
     init_input_len = len(input_sequence)
 
     # perform a single full unroll
-    final_sample_scores = unroll(MAX_INTERACTIONS, f, scores,
-                                encoder_hidden, Variable(torch.LongTensor([[SOS]])), [],
+    final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, f, scores,
+                                encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda()), [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
                                 rollout_inputs,
                                 lambda x: x.data.topk(1))
@@ -355,7 +348,7 @@ def train_single(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_L
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            sample_scores = unroll(MAX_INTERACTIONS - interactions, f, scores[:interactions],
+            sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, f, scores[:interactions],
                                     rollout_hiddens[t], rollout_outputs[t], inter_prefix[:],
                                     [], [], [],
                                     rollout_inputs[:init_input_len + interactions],
@@ -370,4 +363,11 @@ def train_single(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_L
 
     return J
 
+
+learning_rate = 0.01
+encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
+decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
+teacher_forcing_ratio = 0.3
+# create encoder outputs
+# given some input sequence - input
 
