@@ -352,8 +352,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         sample_est = 0.
         for g in range(MONTE_CARLO_N):
-            print "carlo"
-            print g
+            print "carlo %s/%s %s" % (str(t), str(len(rollout_hiddens)), str(g))
             #time.sleep(5)
             # generate an output sequence
             # that is, run through decoder network generating output and storing probabilities
