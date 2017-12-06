@@ -339,6 +339,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
     # perform MC rollout to estimate final RL reward, in the style of SeqGAN
     #J = rollout_outputs[-1] * final_sample_est # accounted for by last loop
+    J = 0.
     for t in range(len(rollout_hiddens)):
 
         inter_prefix += [rollout_selected[t]]
@@ -358,7 +359,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            print [x.data.cpu().numpy()[0] for x in rollout_inputs[:init_input_len + interactions]]
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
                                     rollout_hiddens[t], Variable(torch.LongTensor([[rollout_selected[t]]]).cuda(), requires_grad=False), inter_prefix[:],

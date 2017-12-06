@@ -90,7 +90,6 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
-      print pos
       return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[20],
                      [int(pos)/16+2],
                      [int(pos)%16+2],
@@ -101,7 +100,6 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
-      print cnt
       return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[21],
                      [int(cnt)/16+2],
                      [int(cnt)%16+2],
@@ -109,7 +107,6 @@ class Evaluator:
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
-      #print cnt
       # handle overflows on remote end
       if cnt == 0:
         cnt = 256
