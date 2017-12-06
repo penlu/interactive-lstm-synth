@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import struct
+import time
 
 # python binding for our evaluator friend!
 # creates evaluator server subprocess, attaches to it with pair of pipes
@@ -28,6 +29,8 @@ class Evaluator:
       self.fr_eval = pipe2r
 
       self.sesscount = 0
+      self.odometer = 0
+      self.tottime = 0.
 
     else:
       os.close(pipe1w)
@@ -48,9 +51,12 @@ class Evaluator:
     STX = chr(2)
 
     msg = STX + struct.pack("<I", ID) + NUL
+    start = time.time()
     os.write(self.to_eval, msg)
 
     resp = os.read(self.fr_eval, 256)
+    self.tottime += time.time() - start
+    self.odometer += 1
     assert len(resp) == 256
     assert os.read(self.fr_eval, 1) == NUL
     return [ord(c) for c in list(resp)]
@@ -61,10 +67,13 @@ class Evaluator:
     ETX = chr(3)
 
     msg = ETX + struct.pack("<I", ID) + STX + prog + NUL
+    start = time.time()
     os.write(self.to_eval, msg)
 
     # read result character
     res = os.read(self.fr_eval, 1)
+    self.tottime += time.time() - start
+    self.odometer += 1
 
     if res == '!':
       # stack underflow during execution, at position...
@@ -100,4 +109,12 @@ class Evaluator:
     self.sesscount += 1
 
     return self._candquery(ID)
+
+  def read_odom(self):
+    avg = self.tottime / self.odometer
+    print self.odometer
+    print self.tottime
+    self.tottime = 0
+    self.odometer = 0
+    return avg
 
