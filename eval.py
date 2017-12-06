@@ -4,6 +4,14 @@ import random
 import struct
 import time
 
+import torch
+import torch.autograd as autograd
+from torch.autograd import Variable
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.nn import init
+
 # python binding for our evaluator friend!
 # creates evaluator server subprocess, attaches to it with pair of pipes
 
@@ -81,13 +89,15 @@ class Evaluator:
       pos = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
-      return (-30., ('!', pos))
+      retval = ('!', pos)
+      return (-30., torch.LongTensor([[20], [int(pos)/8+2], [int(pos)%8+2]]))
     elif res == '?':
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
-      return (-30., ('?', cnt))
+      retval = ('?', cnt)
+      return (-30., torch.LongTensor([[21], [int(cnt)/8+2], [int(pos)%8+2]]))
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
@@ -103,20 +113,26 @@ class Evaluator:
       #return ('#', [(ord(resp[cnt * 3]), ord(resp[cnt * 3 + 1]), ord(resp[cnt * 3 + 2])) for i in range(cnt)], wrong)
 
       samp = random.randint(0, cnt - 1)
-      # input, incorrect, correct
-      return (float(2048 - wrong) / 80, (ord(resp[samp * 3]), ord(resp[samp * 3 + 2]), ord(resp[samp * 3 + 1])))
+      # input, correct, incorrect
+      retval = (ord(resp[samp * 3]), ord(resp[samp * 3 + 1]), ord(resp[samp * 3 + 2]))
+      tenret = torch.LongTensor([[retval[0]/8+2], [retval[0]%8+2], [18],
+                                 [retval[1]/8+2], [retval[1]%8+2], [18],
+                                 [retval[2]/8+2], [retval[2]%8+2], [19]])
+      return (float(2048 - wrong) / 80 - 30, tenret)
     elif res == NUL:
       # no errors, we're done!
       #return ()
-      return (100000.)
+      return (100000., torch.LongTensor([[1]]))
 
   def _candquery(self, ID):
     def inner(prog):
+      print prog
       return self.cand_query(ID, prog)
 
     return inner
 
   def eval_init(self, prog):
+    print prog
     self.sess_open(self.sesscount, prog)
     self.sesscount += 1
 

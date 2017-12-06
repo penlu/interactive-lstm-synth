@@ -15,15 +15,14 @@ from torch.nn import init
 torch.manual_seed(1)
 
 
-# # Generator Structure
-# 
-# Generator Class
-# Goals:
-#     
+SOS = 0
+EOS = 1
 
 
-MAX_SEQ_LEN = 10
-MONTE_CARLO_N = 5
+MAX_IN_SEQ_LEN = 150
+MAX_OUT_SEQ_LEN = 40
+MAX_INTERACTIONS = 10
+MONTE_CARLO_N = 16
 class Encoder(nn.Module):
     r"""
     Embeds an input sequence (in our case consisting of input-output pairs)
@@ -45,7 +44,7 @@ class Encoder(nn.Module):
         4. Make Bi-Directional LSTM
     """
 
-    def __init__(self, vocab_dim, embedding_dim, hidden_dim, num_layers, max_seq_len=MAX_SEQ_LEN, rnn='LSTM'):
+    def __init__(self, vocab_dim, embedding_dim, hidden_dim, num_layers, max_seq_len=MAX_IN_SEQ_LEN, rnn='LSTM'):
 
         super(Encoder, self).__init__() # blindly do this
 
@@ -135,6 +134,7 @@ class Decoder(nn.Module):
     without attention and drop-out layers 
     """
     def __init__(self, vocab_dim, hidden_dim, num_layers=1, rnn='LSTM'):
+        # vocab_dim is the size of program output dimensions
         super(Decoder, self).__init__()
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
@@ -154,7 +154,7 @@ class Decoder(nn.Module):
         
         Arguments:
             1. input (1,1): if no teacher_forcing, this corresponds to the last output of the RNN
-            2. hidden : previous hidden layers
+            2. hidden : previous hidden layer state
         """
         output = self.embedding(input).view(1,1,-1)
         outputs_dict = {}
@@ -185,6 +185,111 @@ class Decoder(nn.Module):
             return Variable(h)
 
 
+# generate a program with max_length
+# the argument "generate" contains some program prefix
+def gen_prog(start_hidden, decoder, generate, hiddens, outputs, selected, choice_policy, max_length):
+    # initialize decoder values
+    decoder_hidden = start_hidden
+    decoder_input = Variable(torch.LongTensor([[SOS]])) # starting token has to be SOS
+
+    for di in range(max_length - len(generate)):
+        decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+        #decoder_outputs.append(decoder_output) # stores the "generator probability"
+        
+        # select next decoder input
+        selectv, selecti = choice_policy(decoder_output)
+        next_i = selecti[0][0]
+        
+        decoder_input = Variable(torch.LongTensor([[next_i]]))
+
+        # save decoder behaviors
+        hiddens.append(decoder_hidden)
+        outputs.append(decoder_output)
+        selected.append(next_i)
+        generate.append(next_i)
+
+        if next_i == EOS:
+            #decoder_selected[di+1:,0] = next_i
+            break
+    else:
+        # hit it with the fact that it's over---not the previous output
+        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]])), decoder_hidden)
+        hiddens.append(decoder_hidden)
+        outputs.append(decoder_output)
+        selected.append(EOS)
+        generate.append(EOS)
+
+    return generate
+
+# rollout from some prefix
+# rest_interactions is the number of interactions remaining
+# scores contains the score values produced in all past interaction sessions
+# prefix is the generated program symbols if we're in the middle of generating a program
+# hiddens, output, selected will accumulate those values: don't use this for monte carlo
+# choice is the choice function: max or multinomial sampling, typically
+def unroll(rest_interactions, f, scores, start_hidden, prefix, hiddens, outputs, selected, choice):
+    if len(prefix) != 0:
+        # in the middle of generating a program
+        # finish up this round...
+
+        hiddens.append(start_hidden)
+
+        generate = gen_prog(start_hidden, decoder, prefix,
+                    hiddens, outputs, selected,
+                    choice, max_out_seq_len)
+
+        # recall decoder hidden state for next encoder round
+        encoder_hidden = decoder_hidden
+
+        # evaluator interaction
+        #pred_list = decoder_selected.data.numpy()
+        score, new_example = f(generate) #f(pred_list.tolist())
+
+        # correct program signalled
+        if score == 100000:
+            return scores
+        
+        scores.append(score)
+        inputs[ei+1:ei+1+new_example.size()[0]] = new_example
+        input_length += new_example.size()[0]
+
+        rest_interactions -= 1
+    else:
+        encoder_hidden = start_hidden
+
+    for i in range(rest_interactions):
+        # recall decoder hidden state for future rollout
+        hiddens.append(encoder_hidden)
+        
+        # produce encoder output on current input sequence
+        for ei in range(input_length):
+            encoder_output, encoder_hidden = encoder(inputs[ei], encoder_hidden)
+            encoder_outputs[ei] = encoder_output[0][0]
+        
+        #decoder_hiddens = Variable(torch.zeros(max_out_seq_length, decoder.hidden_size)) # max_length
+        #decoder_outputs = Variable(torch.zeros(max_out_seq_length, decoder.vocab_size)) # set of output distributions
+        #decoder_selected = Variable(torch.zeros(max_out_seq_length, 1)) # max_length + 1 to account for start-of-seq token
+
+        generate = gen_prog(encoder_hidden, decoder, [],
+                    hiddens, outputs, selected,
+                    choice, max_out_seq_len)
+
+        # recall decoder hidden state for next encoder round
+        encoder_hidden = decoder_hidden
+
+        # evaluator interaction
+        #pred_list = decoder_selected.data.numpy()
+        score, new_example = f(generate) #f(pred_list.tolist())
+
+        # correct program signalled
+        if score == 100000:
+            break
+        
+        scores.append(score)
+        inputs[ei+1:ei+1+new_example.size()[0]] = new_example
+        input_length += new_example.size()[0]
+
+    return scores
 
 #learning_rate = 0.01
 #encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
@@ -192,84 +297,93 @@ class Decoder(nn.Module):
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
-def train(input_sequence, target_sequence, evaluator, max_seq_length=MAX_SEQ_LEN):
+
+# a single input sequence, a single target output sequence, and we run a training epoch
+def train_epoch(input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
     input_length = input_sequence.size()[0]
-    target_length = target_sequence.size()[0]
-    encoder_outputs = Variable(torch.zeros(max_seq_length, encoder.hidden_size))
+    #target_length = max_out_seq_len #target_sequence.size()[0]
+
+    encoder_outputs = Variable(torch.zeros(max_in_seq_length, encoder.hidden_size))
     inputs = Variable(torch.zeros(max_seq_length))
-    inputs[:input_length] = inputs
+    inputs[:input_length] = input_sequence
+
+    # initial encoder hidden input: zero
+    encoder_hidden = Variable(torch.zeros(encoder.hidden_size))
     
     e = Evaluator()
+    f = e.eval_init(target_sequence)
+
+    # score prefix
     scores = []
-    for i in range(num_interactions):
-        
-        # sequentially provide inputs to decoder
-        for ei in range(input_length+i):
-            encoder_output, encoder_hidden = encoder(inputs[ei], encoder_hidden)
-            encoder_outputs[ei] = encoder_output[0][0]
-        
 
-        # init decoder hidden to encoder hidden
-        decoder_hidden = encoder_hidden
+    # save intermediate hidden states, output multinomials, selected outputs for future rollout
+    rollout_hiddens = [] # rollout_hiddens[t] = Y_1:t-1
+    rollout_outputs = []
+    rollout_selected = []
 
-        decoder_input = Variable(torch.LongTensor[[SOS]]) # starting token has to be SOS
+    # perform a single full unroll
+    final_sample_scores = unroll(MAX_INTERACTIONS, f, scores, encoder_hidden, [], rollout_hiddens, rollout_outputs, rollout_selected, lambda x: x.data.topk(1))
+    final_sample_est = discriminator(final_sample_scores)
 
-        decoder_outputs = Variable(torch.zeros(max_length, decoder.hidden_size)) # set of output distributions
-        decoder_sequence = Variable(torch.zeros(max_length, 1)) # max_length + 1 to account for [SOS_token]
-        
-        for di in range(target_length): # TODO: check with LU
-            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-            decoder_outputs[i] = decoder_output # stores the "generator probability"
+    assert len(rollout_hiddens) == len(rollout_outputs)
+    assert len(rollout_outputs) == len(rollout_selected)
+
+    inter_scores = []
+    inter_prefix = []
+    interactions = 0 # count of interactions we've had so far in this rollout
+    #tokens_already = 0 # if we're in the middle of an instance
+
+    # perform MC rollout to estimate final RL reward, in the style of SeqGAN
+    J = rollout_outputs[-1] * final_sample_est
+    for t in range(len(rollout_hiddens)):
+
+        if rollout_selected[t] == EOS:
+            interactions += 1
+            #tokens_already = 0
+            inter_scores.append(scores[interactions - 1])
+            inter_prefix = []
+
+        sample_est = 0.
+        for g in range(MONTE_CARLO_N):
+            # generate an output sequence
+            # that is, run through decoder network generating output and storing probabilities
+            # compute Q(rollout_hiddens[t], rollout_selected[t])
+
+            sample_scores = unroll(MAX_INTERACTIONS - interactions, f, inter_scores[:],
+                                    rollout_hiddens[t], inter_prefix[:], [], [], [],
+                                    lambda x: torch.multinomial(torch.exp(x), 1))
+            sample_est += discriminator(sample_scores)
             
-            topv, topi = decoder_output.data.topk(1)
-            ni = topi[0][0]
-            
-            decoder_input = Variable(torch.LongTensor([[ni]]))
-            decoder_sequence[di,0] = ni
-            if ni == EOS:
-                decoder_sequence[di+1:,0] = ni
-                break
+
+            #phi = Variable(torch.zeros(1, max_length), requires_grad=False)#state-action vector
+            #for di in range(target_length):
+            #    decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+            #    decoder_outputs[i] = decoder_output # stores the "generator probability"
+
+            #    topv, topi = decoder_output.data.topk(1)
+            #    ni = topi[0][0]
+
+            #    decoder_input = Variable(torch.LongTensor([[ni]]))
+            #    decoder_sequence[di,0] = ni
+            #    if ni == EOS:
+            #        decoder_sequence[di+1:,0] = ni
+            #        break
+            #for t in range(1,target_length):
+            #    phi[0, t-1] = state_action_function(decoder_sequence[:t], 
+            #                              decoder_sequence[t], decoder_outputs)#decoder_outputs[t-1])
+
+            #for y in decoder_sequence:
+            #    J += decoder_outputs.mm(phi)[y]
+        sample_est = sample_est / MONTE_CARLO_N
         
-        f = e.eval_init(target_sequence)
-        pred_list = decoder_sequence.data.numpy()
-        score, new_example = f(pred_list.tolist())
-        
-        encoder_hidden = decoder_hidden
-        inputs[ei+1] = new_example
-        scores.append(score)
-        
-        if i == num_interactions - 1 or score == 100000:
-            J = 0
-            for g in range(Ng):
-                # generate an output sequence
-                # that is, run through decoder network generating output and storing probabilities
+        J += rollout_outputs[t] * sample_est
 
-                phi = Variable(torch.zeros(1, max_length), requires_grad=False)#state-action vector
-                for di in range(target_length): # TODO: check with LU
-                    decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-                    decoder_outputs[i] = decoder_output # stores the "generator probability"
+    J.backward()
 
-                    topv, topi = decoder_output.data.topk(1)
-                    ni = topi[0][0]
-
-                    decoder_input = Variable(torch.LongTensor([[ni]]))
-                    decoder_sequence[di,0] = ni
-                    if ni == EOS:
-                        decoder_sequence[di+1:,0] = ni
-                        break
-                for t in range(1,target_length):
-                    phi[0, t-1] = state_action_function(decoder_sequence[:t], 
-                                                  decoder_sequence[t], decoder_outputs)#decoder_outputs[t-1])
-
-                for y in decoder_sequence:
-                    J += decoder_outputs.mm(phi)[y]
-            J = J/Ng
-            J.backward()
-            
-        return J.data[0], scores
+    return J
 
 
 def gen_sequences(current_state_seq, policy, N=MONTE_CARLO_N, max_seq_len=MAX_SEQ_LEN):
@@ -348,9 +462,6 @@ def state_action_function(current_states, action, policy, N=5,  max_seq_length=1
         new_states[current_states.size()[0], :] = action
         
         return discriminator(new_states)
-
-
-# In[166]:
 
 ### OLD VERSION - DO NOT USE ###
 def gen_sequences(current_state_seq, policy, N=MONTE_CARLO_N, max_seq_len=MAX_SEQ_LEN):
