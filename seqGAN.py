@@ -22,6 +22,7 @@ torch.manual_seed(1)
 SOS = 0
 EOS = 1
 
+e = Evaluator()
 
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 24
@@ -306,7 +307,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #encoder_hidden = (encoder_h0, encoder_c0)
     encoder_hidden = encoder.init_hidden()
     
-    e = Evaluator()
     f = e.eval_init(target_sequence)
 
     # score prefix
@@ -359,21 +359,51 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
+            def samp(x):
+                v = torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0]
+                return v
+
+            select = samp(rollout_outputs[t])
+
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
-                                    rollout_hiddens[t], Variable(torch.LongTensor([[rollout_selected[t]]]).cuda(), requires_grad=False), inter_prefix[:],
+                                    rollout_hiddens[t], Variable(torch.LongTensor([[select]]).cuda(), requires_grad=False), inter_prefix[:],
                                     [], [], [],
                                     rollout_inputs[:init_input_len + interactions],
-                                    lambda x: torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0])
+                                    samp)
             sample_est += discriminator(sample_scores)
 
         sample_est = sample_est / MONTE_CARLO_N
+
+        J += torch.log(rollout_outputs[t][0][select]) * sample_est
         
-        J += rollout_outputs[t][0][rollout_selected[t]] * sample_est
+        #J += torch.log(rollout_outputs[t][0][select].clamp(0.00001, 1000)) * sample_est
+        #print J
 
     print last_inter_prefix
 
+    def clamp(message):
+        #x.data.clamp_(max=100000,min=-100000)
+        def _internal(x):
+            #print message
+            #print x
+            m = max(torch.norm(x.data) / 100000, 1)
+            return x / m
+        return _internal
+
+    for i in range(len(rollout_hiddens)):
+        rollout_outputs[i].register_hook(clamp("output %s" % str(i)))
+        rollout_hiddens[i][0].register_hook(clamp("hidden h %s" % str(i)))
+        rollout_hiddens[i][1].register_hook(clamp("hidden c %s" % str(i)))
+
     J.backward()
+
+    #nn.utils.clip_grad_norm(encoder.parameters(),100000)
+    #nn.utils.clip_grad_norm(decoder.parameters(),100000)
+
+    #nn.utils.clip_grad_norm(rollout_outputs, 100000)
+    #nn.utils.clip_grad_norm([x[0] for x in rollout_hiddens], 100000)
+    #nn.utils.clip_grad_norm([x[1] for x in rollout_hiddens], 100000)
 
     return J
 
@@ -384,28 +414,38 @@ def discriminator(scores):
 encoder = Encoder(22, 100, 100, 3).cuda()
 decoder = Decoder(14, 100, num_layers=3).cuda()
 
-learning_rate = 0.1
+learning_rate = 0.001
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
 
-# 050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd050d151d252d353d454d555d656d757d858d959da5adb5bdc5cdd5dde5edf5fd
-
 torch.cuda.device(0)
 
+
+# PRE-TRAIN
+encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
+decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
+
+
+
+#nn.utils.clip_grad_norm(encoder.parameters(), 100000)
+#nn.utils.clip_grad_norm(decoder.parameters(), 100000)
+
+# encode single target input for seqGAN
 inseq = [Variable(torch.LongTensor([x]).cuda(), requires_grad=False) for x in [SOS,
                                                             2, 2, 18, 2, 7, 19,
                                                             2, 3, 18, 2, 15, 19,
                                                             2, 4, 18, 3, 7, 19,
                                                             2, 5, 19, 3, 15, 19, EOS]]
 
-encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
-decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
+# seqGAN training step
 for i in range(100):
     print "EPOCH %s" % str(i)
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
     train_single(encoder, decoder, inseq, "BCDCDCDC")
+    #print decoder.parameters().next()
+    print decoder.parameters().next().grad
     encoder_optimizer.step()
     decoder_optimizer.step()
 
