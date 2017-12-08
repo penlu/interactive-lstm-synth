@@ -90,7 +90,7 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
-      return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[20],
+      return (1., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[20],
                      [int(pos)/16+2],
                      [int(pos)%16+2],
                      [1]]])
@@ -100,7 +100,7 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
-      return (-30., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[21],
+      return (1., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[21],
                      [int(cnt)/16+2],
                      [int(cnt)%16+2],
                      [1]]])
@@ -124,7 +124,7 @@ class Evaluator:
                 [retval[1]/16+2], [retval[1]%16+2], [18],
                 [retval[2]/16+2], [retval[2]%16+2], [19], [1]]
       tenret = [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in thearr]
-      return (float(2048 - wrong) / 80 - 30, tenret)
+      return (float(2048 - wrong) / 80 + 1, tenret)
     elif res == NUL:
       # no errors, we're done!
       #return ()
