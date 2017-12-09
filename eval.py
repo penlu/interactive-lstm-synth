@@ -129,7 +129,7 @@ class Evaluator:
       return (100000., torch.LongTensor([[1]]))
 
   def _candquery(self, ID):
-    lookup = [chr(0), chr(0), '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+    lookup = ['@', chr(0), 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
     def inner(prog):
       prog = "".join([lookup[x] for x in prog])
       #print prog

@@ -223,6 +223,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         # hit it with the fact that it's over---not the previous output
         hiddens.append(decoder_hidden)
         decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]]).cuda(), requires_grad=False), decoder_hidden)
+
         outputs.append(decoder_output)
         selected.append(EOS)
         prefix.append(EOS)
