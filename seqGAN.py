@@ -319,13 +319,17 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     rollout_inputs = input_sequence # stuff what goes to the encoder
     init_input_len = len(input_sequence)
 
+    def samp(x):
+        v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
+        return v
+
     # perform a single full unroll
     final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
                                 f, scores,
                                 encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), requires_grad=False), [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
-                                rollout_inputs,
-                                lambda x: x.data.topk(1)[1][0][0])
+                                rollout_inputs, samp)
+                                #lambda x: x.data.topk(1)[1][0][0])
     final_sample_est = discriminator(final_sample_scores)
 
     assert len(rollout_hiddens) == len(rollout_outputs)
@@ -358,10 +362,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             # generate an output sequence
             # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
-
-            def samp(x):
-                v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
-                return v
 
             select = samp(rollout_outputs[t])
 
