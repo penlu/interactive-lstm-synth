@@ -53,16 +53,17 @@ class Evaluator:
       _child(pipe1r, pipe2w)
 
   def sess_open(self, ID, prog):
-    NUL = chr(0)
-    SOH = chr(1)
-    STX = chr(2)
+    NUL = chr(0).encode('utf-8')
+    SOH = chr(1).encode('utf-8')
+    STX = chr(2).encode('utf-8')
+    prog = prog.encode('utf-8')
 
     msg = SOH + struct.pack("<I", ID) + STX + prog + NUL
     os.write(self.to_eval, msg)
 
   def sess_query(self, ID):
-    NUL = chr(0)
-    STX = chr(2)
+    NUL = chr(0).encode('utf-8')
+    STX = chr(2).encode('utf-8')
 
     msg = STX + struct.pack("<I", ID) + NUL
     start = time.time()
@@ -76,12 +77,14 @@ class Evaluator:
     return [ord(c) for c in list(resp)]
 
   def cand_query(self, ID, prog):
-    NUL = chr(0)
-    STX = chr(2)
-    ETX = chr(3)
+    NUL = chr(0).encode('utf-8')
+    STX = chr(2).encode('utf-8')
+    ETX = chr(3).encode('utf-8')
+    prog = prog.encode('utf-8')
 
     msg = ETX + struct.pack("<I", ID) + STX + prog + NUL
     start = time.time()
+    print msg
     os.write(self.to_eval, msg)
 
     # read result character
