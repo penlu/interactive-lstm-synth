@@ -20,15 +20,16 @@ import torch.multiprocessing as mp
 
 torch.manual_seed(1)
 
+torch.cuda.device(0) # let's go
+
+e = Evaluator()
 
 SOS = 0
 EOS = 1
 
-e = Evaluator()
+# preconstruct token table
 
-torch.cuda.device(0) # let's go
-
-pool = mp.Pool(4)
+dec_tokens = [Variable(torch.from_numpy(np.array([[i]])).cuda(), requires_grad=False) for i in range(14)]
 
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 24
@@ -171,7 +172,7 @@ class Decoder(nn.Module):
         #    output = F.leaky_relu(output)
         #    output, hidden = self.rnn(output, hidden)
         output, hidden = self.rnn(embedding, hidden)
-        output = F.softmax(self.out(output[0]))
+        output = F.softmax(self.out(output[0]), dim=1)
 
         self.hidden = hidden
         return output, hidden
@@ -210,7 +211,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         # select next decoder input
         next_i = choice_policy(decoder_output)
         
-        decoder_input = Variable(torch.LongTensor([[next_i]]).cuda(), requires_grad=False)
+        decoder_input = dec_tokens[next_i]
 
         # save decoder behaviors
         outputs.append(decoder_output)
@@ -222,7 +223,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
     else:
         # hit it with the fact that it's over---not the previous output
         hiddens.append(decoder_hidden)
-        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]]).cuda(), requires_grad=False), decoder_hidden)
+        decoder_output, decoder_hidden = decoder(dec_tokens[EOS], decoder_hidden)
 
         outputs.append(decoder_output)
         selected.append(EOS)
@@ -276,7 +277,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         # recall decoder hidden state for next encoder round
         generate, encoder_hidden = gen_prog(
                     encoder_hidden,
-                    Variable(torch.LongTensor([[SOS]]), requires_grad=False).cuda(),
+                    dec_tokens[SOS],
                     decoder, [],
                     hiddens, outputs, selected,
                     choice, max_out_seq_len)
@@ -337,7 +338,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     # perform a single full unroll
     final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
                                 f, scores,
-                                encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), requires_grad=False), [],
+                                encoder_hidden, dec_tokens[SOS], [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
                                 rollout_inlens, rollout_inputs,
                                 samp) #lambda x: x.data.topk(1)[1][0][0])
@@ -351,8 +352,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
 
     # perform MC rollout to estimate final RL reward, in the style of SeqGAN
-
-    J = 0.
 
     # construct session prefixes
     prefixes = []
@@ -368,7 +367,9 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             interactions += 1
             cur_prefix = []
 
+    J = 0.
     for t in range(len(rollout_hiddens)):
+    #def q_est(t):
         interactions = prefixes[t][0]
 
         # re-prepare input slice
@@ -384,7 +385,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
-                                    rollout_hiddens[t], Variable(torch.LongTensor([[select]]).cuda(), requires_grad=False),
+                                    rollout_hiddens[t], dec_tokens[select],
                                     prefixes[t][1], [], [], [],
                                     [mc_inlen], mc_inputs,
                                     samp)
@@ -392,13 +393,17 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         sample_est = sample_est / MONTE_CARLO_N
 
-        J -= torch.log(rollout_outputs[t][0][select]) * sample_est
-        
-
         #print "Jvalue %s" % str(t)
         #print J
         #print rollout_outputs[t][0][select]
         #print sample_est
+
+        #return - torch.log(rollout_outputs[t][0][select]) * sample_est
+        J -= torch.log(rollout_outputs[t][0][select]) * sample_est
+
+    #pool = mp.Pool(4)
+
+    #J = sum(pool.imap_unordered(q_est, range(len(rollout_hiddens))))
 
     def clamp(message):
         def _internal(x):

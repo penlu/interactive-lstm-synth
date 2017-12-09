@@ -4,6 +4,8 @@ import random
 import struct
 import time
 
+import numpy as np
+
 import torch
 import torch.autograd as autograd
 from torch.autograd import Variable
@@ -23,7 +25,7 @@ def _child(fr_parent, to_parent):
   os.execl("/home/penlu/Documents/scratch/interactive-lstm-synth/eval/eval", "eval")
 
 def _stackl(l):
-  return torch.stack([torch.LongTensor([x]).cuda() for x in l], dim=0)
+  return torch.stack([torch.from_numpy(np.array([int(x)])).cuda() for x in l], dim=0)
   #return torch.stack([Variable(torch.LongTensor([x]).cuda(),
   #                              requires_grad=False) for x in l], dim=0)
 
@@ -69,12 +71,12 @@ class Evaluator:
     start = time.time()
     os.write(self.to_eval, msg)
 
-    resp = os.read(self.fr_eval, 256)
+    resp = bytes(os.read(self.fr_eval, 256))
     self.tottime += time.time() - start
     self.odometer += 1
     assert len(resp) == 256
     assert os.read(self.fr_eval, 1) == NUL
-    return [ord(c) for c in list(resp)]
+    return [c for c in list(resp)]
 
   def cand_query(self, ID, prog):
     NUL = chr(0).encode('utf-8')
@@ -84,35 +86,34 @@ class Evaluator:
 
     msg = ETX + struct.pack("<I", ID) + STX + prog + NUL
     start = time.time()
-    print msg
     os.write(self.to_eval, msg)
 
     # read result character
-    res = os.read(self.fr_eval, 1)
+    res = ord(os.read(self.fr_eval, 1))
     self.tottime += time.time() - start
     self.odometer += 1
 
-    if res == '!':
+    if res == ord('!'):
       # stack underflow during execution, at position...
       pos = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
       return (1., _stackl([20, int(pos)/16+2, int(pos)%16+2, 1]))
-    elif res == '?':
+    elif res == ord('?'):
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
       return (1., _stackl([21, int(cnt)/16+2, int(cnt)%16+2, 1]))
-    elif res == '#':
+    elif res == ord('#'):
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
       # handle overflows on remote end
       if cnt == 0:
         cnt = 256
-      resp = os.read(self.fr_eval, cnt * 3)
+      resp = bytes(os.read(self.fr_eval, cnt * 3))
       wrong = ord(os.read(self.fr_eval, 1))*256 + ord(os.read(self.fr_eval, 1))
 
       # list of incorrect results
@@ -121,7 +122,7 @@ class Evaluator:
 
       samp = random.randint(0, cnt - 1)
       # input, correct, incorrect
-      retval = (ord(resp[samp * 3]), ord(resp[samp * 3 + 1]), ord(resp[samp * 3 + 2]))
+      retval = (resp[samp * 3], resp[samp * 3 + 1], resp[samp * 3 + 2])
       new_ex = [retval[0]/16+2, retval[0]%16+2, 18,
                 retval[1]/16+2, retval[1]%16+2, 18,
                 retval[2]/16+2, retval[2]%16+2, 19, 1]
@@ -130,6 +131,8 @@ class Evaluator:
       # no errors, we're done!
       #return ()
       return (100000., torch.LongTensor([[1]]))
+    else:
+      raise Exception
 
   def _candquery(self, ID):
     lookup = ['@', chr(0), 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
