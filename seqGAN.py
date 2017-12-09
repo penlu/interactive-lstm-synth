@@ -358,12 +358,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     J = 0.
     for t in range(len(rollout_hiddens)):
 
-        inter_prefix += [rollout_selected[t]]
-
-        if rollout_selected[t] == EOS:
-            interactions += 1
-            inter_prefix = []
-
         # re-prepare input slice
         mc_inlen = rollout_inlens[interactions]
         mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
@@ -387,6 +381,12 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         J -= torch.log(rollout_outputs[t][0][select]) * sample_est
         
+        inter_prefix += [rollout_selected[t]]
+
+        if rollout_selected[t] == EOS:
+            interactions += 1
+            inter_prefix = []
+
         #print "Jvalue %s" % str(t)
         #print J
         #print rollout_outputs[t][0][select]
