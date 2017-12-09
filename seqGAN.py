@@ -300,8 +300,52 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
 
     return scores_so_far
 
+# init target
+target_sequence = "BCDCDCDC"
+f = e.eval_init(target_sequence)
+
+def q_est(prefix):
+    global f
+    interactions = prefix[0]
+    pre = prefix[1]
+    rollout_inlens = prefix[2]
+    rollout_inputs = prefix[3]
+    rollout_hiddens = prefix[4]
+    rollout_output = prefix[5]
+    long_zeros_in = prefix[6]
+    t = prefix[7]
+    scores = prefix[8]
+    max_out_seq_len = prefix[9]
+
+    # re-prepare input slice
+    mc_inlen = rollout_inlens[interactions]
+    mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
+                           long_zeros_in[mc_inlen:]], dim=0)
+    sample_est = 0.
+    print("carlo %s/%s" % (str(t), str(len(rollout_hiddens))))
+    for g in range(MONTE_CARLO_N):
+        # compute Q(rollout_hiddens[t], rollout_selected[t])
+
+        select = samp(rollout_output)
+
+        sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
+                                f, scores[:interactions],
+                                rollout_hiddens[t], dec_tokens[select],
+                                pre, [], [], [],
+                                [mc_inlen], mc_inputs,
+                                samp)
+        sample_est += discriminator(sample_scores)
+
+    sample_est = sample_est / MONTE_CARLO_N
+
+    return - torch.log(rollout_output[0][select]) * sample_est
+
+def samp(x):
+    v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
+    return v
+
 # a single input sequence, a single target output sequence, and we run
-def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
+def train_single(encoder, decoder, input_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
@@ -310,8 +354,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #inputs[:len(input_sequence)] = input_sequence
 
 
-    # init target
-    f = e.eval_init(target_sequence)
 
     # initialize encoder hidden state
     encoder_hidden = encoder.init_hidden()
@@ -330,10 +372,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     rollout_selected = [] # rollout_selected[t] = y_t
     rollout_inputs = inputs #input_sequence[:] # stuff what goes to the encoder
     rollout_inlens = [len(input_sequence)]
-
-    def samp(x):
-        v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
-        return v
 
     # perform a single full unroll
     final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
@@ -360,50 +398,48 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     interactions = 0 # count of interactions we've had so far in this rollout
     cur_prefix = []
     for t in range(len(rollout_hiddens)):
-        prefixes.append((interactions, cur_prefix))
+        prefixes.append((interactions, cur_prefix, rollout_inlens, rollout_inputs, rollout_hiddens, rollout_outputs[t], long_zeros_in, t, scores, max_out_seq_len))
 
         cur_prefix += [rollout_selected[t]]
         if rollout_selected[t] == EOS:
             interactions += 1
             cur_prefix = []
 
-    J = 0.
-    for t in range(len(rollout_hiddens)):
+    #J = 0.
+    #for t in range(len(rollout_hiddens)):
     #def q_est(t):
-        interactions = prefixes[t][0]
+    #    interactions = prefixes[t][0]
 
-        # re-prepare input slice
-        mc_inlen = rollout_inlens[interactions]
-        mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
-                               long_zeros_in[mc_inlen:]], dim=0)
-        sample_est = 0.
-        print("carlo %s/%s" % (str(t), str(len(rollout_hiddens))))
-        for g in range(MONTE_CARLO_N):
-            # compute Q(rollout_hiddens[t], rollout_selected[t])
+    #    # re-prepare input slice
+    #    mc_inlen = rollout_inlens[interactions]
+    #    mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
+    #                           long_zeros_in[mc_inlen:]], dim=0)
+    #    sample_est = 0.
+    #    print("carlo %s/%s" % (str(t), str(len(rollout_hiddens))))
+    #    for g in range(MONTE_CARLO_N):
+    #        # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            select = samp(rollout_outputs[t])
+    #        select = samp(rollout_outputs[t])
 
-            sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
-                                    f, scores[:interactions],
-                                    rollout_hiddens[t], dec_tokens[select],
-                                    prefixes[t][1], [], [], [],
-                                    [mc_inlen], mc_inputs,
-                                    samp)
-            sample_est += discriminator(sample_scores)
+    #        sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
+    #                                f, scores[:interactions],
+    #                                rollout_hiddens[t], dec_tokens[select],
+    #                                prefixes[t][1], [], [], [],
+    #                                [mc_inlen], mc_inputs,
+    #                                samp)
+    #        sample_est += discriminator(sample_scores)
 
-        sample_est = sample_est / MONTE_CARLO_N
+    #    sample_est = sample_est / MONTE_CARLO_N
 
         #print "Jvalue %s" % str(t)
         #print J
         #print rollout_outputs[t][0][select]
         #print sample_est
 
-        #return - torch.log(rollout_outputs[t][0][select]) * sample_est
-        J -= torch.log(rollout_outputs[t][0][select]) * sample_est
+    #    return - torch.log(rollout_outputs[t][0][select]) * sample_est
+        #J -= torch.log(rollout_outputs[t][0][select]) * sample_est
 
-    #pool = mp.Pool(4)
-
-    #J = sum(pool.imap_unordered(q_est, range(len(rollout_hiddens))))
+    J = sum(pool.imap_unordered(q_est, prefixes, chunksize=4))
 
     def clamp(message):
         def _internal(x):
@@ -450,34 +486,40 @@ inseq = [SOS, 2, 2, 18, 2, 7, 19,
               2, 5, 19, 3, 15, 19, EOS]
 
 # seqGAN training step
-for i in range(1000):
-    print("EPOCH %s" % str(i))
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
-    j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
-    print("reward: %s" % str(j))
-    #print "outputs start"
-    #for i in range(len(outs)):
-    #  print "outputs %s" % str(i)
-    #  print outs[i]
-    #print "hiddens h start"
-    #for i in range(len(hids)):
-    #  print "hiddens h %s" % str(i)
-    #  print hids[i][0]
-    #print "hiddens c start"
-    #for i in range(len(outs)):
-    #  print "hiddens c %s" % str(i)
-    #  print hids[i][1]
-    #print "encoder params and grads"
-    #for i in encoder.parameters():
-    #  print i
-    #  print i.grad
-    #print "decoder params and grads"
-    #for i in decoder.parameters():
-    #  print i
-    #  print i.grad
-    #print decoder.parameters().next()
-    #print decoder.parameters().next().grad
-    encoder_optimizer.step()
-    decoder_optimizer.step()
+if __name__ == "__main__":
+    mp.set_start_method('forkserver')
+
+    pool = mp.Pool(3)
+
+    for i in range(4):
+        print("EPOCH %s" % str(i))
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
+
+        j, outs, hids = train_single(encoder, decoder, inseq)
+        print("reward: %s" % str(j))
+        #print "outputs start"
+        #for i in range(len(outs)):
+        #  print "outputs %s" % str(i)
+        #  print outs[i]
+        #print "hiddens h start"
+        #for i in range(len(hids)):
+        #  print "hiddens h %s" % str(i)
+        #  print hids[i][0]
+        #print "hiddens c start"
+        #for i in range(len(outs)):
+        #  print "hiddens c %s" % str(i)
+        #  print hids[i][1]
+        #print "encoder params and grads"
+        #for i in encoder.parameters():
+        #  print i
+        #  print i.grad
+        #print "decoder params and grads"
+        #for i in decoder.parameters():
+        #  print i
+        #  print i.grad
+        #print decoder.parameters().next()
+        #print decoder.parameters().next().grad
+        encoder_optimizer.step()
+        decoder_optimizer.step()
 
