@@ -447,6 +447,8 @@ for i in range(100):
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
     j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
+    print "reward"
+    print j
     #print "outputs start"
     #for i in range(len(outs)):
     #  print "outputs %s" % str(i)
