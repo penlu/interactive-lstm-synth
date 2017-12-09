@@ -360,10 +360,10 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
             def samp(x):
-                v = torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0]
+                v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
                 return v
 
-            select = samp(torch.log(rollout_outputs[t]))
+            select = samp(rollout_outputs[t])
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
@@ -375,11 +375,13 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         sample_est = sample_est / MONTE_CARLO_N
 
-        J += torch.log(rollout_outputs[t][0][select]) * sample_est
+        J -= torch.log(rollout_outputs[t][0][select]) * sample_est
         
         #J += torch.log(rollout_outputs[t][0][select].clamp(0.00001, 1000)) * sample_est
         print "Jvalue %s" % str(t)
         print J
+        print rollout_outputs[t][0][select]
+        print sample_est
 
     print last_inter_prefix
 
@@ -415,7 +417,7 @@ def discriminator(scores):
 encoder = Encoder(22, 100, 100, 3).cuda()
 decoder = Decoder(14, 100, num_layers=3).cuda()
 
-learning_rate = 1
+learning_rate = 0.001
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
@@ -445,26 +447,26 @@ for i in range(100):
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
     j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
-    print "outputs start"
-    for i in range(len(outs)):
-      print "outputs %s" % str(i)
-      print outs[i]
-    print "hiddens h start"
-    for i in range(len(hids)):
-      print "hiddens h %s" % str(i)
-      print hids[i][0]
-    print "hiddens c start"
-    for i in range(len(outs)):
-      print "hiddens c %s" % str(i)
-      print hids[i][1]
-    print "encoder params and grads"
-    for i in encoder.parameters():
-      print i
-      print i.grad
-    print "decoder params and grads"
-    for i in decoder.parameters():
-      print i
-      print i.grad
+    #print "outputs start"
+    #for i in range(len(outs)):
+    #  print "outputs %s" % str(i)
+    #  print outs[i]
+    #print "hiddens h start"
+    #for i in range(len(hids)):
+    #  print "hiddens h %s" % str(i)
+    #  print hids[i][0]
+    #print "hiddens c start"
+    #for i in range(len(outs)):
+    #  print "hiddens c %s" % str(i)
+    #  print hids[i][1]
+    #print "encoder params and grads"
+    #for i in encoder.parameters():
+    #  print i
+    #  print i.grad
+    #print "decoder params and grads"
+    #for i in decoder.parameters():
+    #  print i
+    #  print i.grad
     #print decoder.parameters().next()
     #print decoder.parameters().next().grad
     encoder_optimizer.step()
