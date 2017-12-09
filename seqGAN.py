@@ -318,7 +318,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     rollout_hiddens = [] # rollout_hiddens[t] = Y_1:t-1
     rollout_outputs = [] # rollout_outputs[t] = G(y_t | Y_1:t-1)
     rollout_selected = [] # rollout_selected[t] = y_t
-    rollout_inputs = input_sequence # stuff what goes to the encoder
+    rollout_inputs = input_sequence[:] # stuff what goes to the encoder
     rollout_inlens = [len(input_sequence)]
 
     def samp(x):
