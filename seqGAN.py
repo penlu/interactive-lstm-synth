@@ -388,9 +388,9 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     def clamp(message):
         #x.data.clamp_(max=100000,min=-100000)
         def _internal(x):
-            print message
+            #print message
             m = max(torch.norm(x.data) / 100000, 1)
-            print x / m
+            #print x / m
             return x / m
         return _internal
 
