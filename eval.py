@@ -22,6 +22,11 @@ def _child(fr_parent, to_parent):
   os.close(to_parent)
   os.execl("/home/penlu/Documents/scratch/interactive-lstm-synth/eval/eval", "eval")
 
+def _stackl(l):
+  return torch.stack([torch.LongTensor([x]).cuda() for x in l], dim=0)
+  #return torch.stack([Variable(torch.LongTensor([x]).cuda(),
+  #                              requires_grad=False) for x in l], dim=0)
+
 class Evaluator:
 
   def __init__(self):
@@ -90,20 +95,14 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
-      return (1., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[20],
-                     [int(pos)/16+2],
-                     [int(pos)%16+2],
-                     [1]]])
+      return (1., _stackl([20, int(pos)/16+2, int(pos)%16+2, 1]))
     elif res == '?':
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
-      return (1., [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in [[21],
-                     [int(cnt)/16+2],
-                     [int(cnt)%16+2],
-                     [1]]])
+      return (1., _stackl([21, int(cnt)/16+2, int(cnt)%16+2, 1]))
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
@@ -120,11 +119,10 @@ class Evaluator:
       samp = random.randint(0, cnt - 1)
       # input, correct, incorrect
       retval = (ord(resp[samp * 3]), ord(resp[samp * 3 + 1]), ord(resp[samp * 3 + 2]))
-      thearr = [[retval[0]/16+2], [retval[0]%16+2], [18],
-                [retval[1]/16+2], [retval[1]%16+2], [18],
-                [retval[2]/16+2], [retval[2]%16+2], [19], [1]]
-      tenret = [Variable(torch.LongTensor(x).cuda(), requires_grad=False) for x in thearr]
-      return (float(2048 - wrong) / 80 + 1, tenret)
+      new_ex = [retval[0]/16+2, retval[0]%16+2, 18,
+                retval[1]/16+2, retval[1]%16+2, 18,
+                retval[2]/16+2, retval[2]%16+2, 19, 1]
+      return (float(2048 - wrong) / 80 + 1, _stackl(new_ex))
     elif res == NUL:
       # no errors, we're done!
       #return ()
