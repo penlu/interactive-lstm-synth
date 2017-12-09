@@ -231,7 +231,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
 # hiddens, output, selected will accumulate those values: don't use this for monte carlo
 # inputs is the inputs we've accumulated in this rollout, for encoder use
 # choice is the choice function: max or multinomial sampling, typically
-def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, selected, inputs, choice):
+def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, selected, inlens, inputs, choice):
     if len(prefix) != 0:
         # in the middle of generating a program
         # finish up this round...
@@ -250,6 +250,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
             return scores_so_far
         
         scores_so_far.append(score)
+        inlens += [inlens[-1] + len(new_example)]
         inputs += new_example
         #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
         #input_length += new_example.size()[0]
@@ -282,6 +283,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
             return scores_so_far
         
         scores_so_far.append(score)
+        inlens += [inlens[-1] + len(new_example)]
         inputs += new_example
         #inputs[ei+1:ei+1+new_example.size()[0]] = new_example
         #input_length += new_example.size()[0]
@@ -297,8 +299,8 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #target_length = max_out_seq_len #target_sequence.size()[0]
 
     #encoder_outputs = Variable(torch.zeros(max_in_seq_length, encoder.hidden_size))
-    #inputs = Variable(torch.zeros(max_seq_length))
-    #inputs[:input_length] = input_sequence
+    #inputs = Variable(torch.zeros(max_in_seq_length))
+    #inputs[:len(input_sequence)] = input_sequence
 
     # initial encoder hidden input: zero
     #encoder_hidden = Variable(torch.zeros(encoder.hidden_dim)).cuda()
@@ -317,7 +319,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     rollout_outputs = [] # rollout_outputs[t] = G(y_t | Y_1:t-1)
     rollout_selected = [] # rollout_selected[t] = y_t
     rollout_inputs = input_sequence # stuff what goes to the encoder
-    init_input_len = len(input_sequence)
+    rollout_inlens = [len(input_sequence)]
 
     def samp(x):
         v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
@@ -328,8 +330,8 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
                                 f, scores,
                                 encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), requires_grad=False), [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
-                                rollout_inputs, samp)
-                                #lambda x: x.data.topk(1)[1][0][0])
+                                rollout_inlens, rollout_inputs,
+                                samp) #lambda x: x.data.topk(1)[1][0][0])
     final_sample_est = discriminator(final_sample_scores)
 
     assert len(rollout_hiddens) == len(rollout_outputs)
@@ -369,7 +371,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
                                     f, scores[:interactions],
                                     rollout_hiddens[t], Variable(torch.LongTensor([[select]]).cuda(), requires_grad=False), inter_prefix[:],
                                     [], [], [],
-                                    rollout_inputs[:init_input_len + interactions],
+                                    [0], rollout_inputs[:rollout_inlens[interactions]],
                                     samp)
             sample_est += discriminator(sample_scores)
 
