@@ -334,6 +334,9 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
                                 samp) #lambda x: x.data.topk(1)[1][0][0])
     final_sample_est = discriminator(final_sample_scores)
 
+    print "sample score %s" % str(final_sample_est)
+    print rollout_outputs
+
     assert len(rollout_hiddens) == len(rollout_outputs)
     assert len(rollout_outputs) == len(rollout_selected)
 
@@ -354,12 +357,13 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
             interactions += 1
             #tokens_already = 0
             #inter_scores.append(scores[interactions - 1])
-            last_inter_prefix = inter_prefix
+            #last_inter_prefix = inter_prefix
             inter_prefix = []
 
         sample_est = 0.
+        print "carlo %s/%s" % (str(t), str(len(rollout_hiddens)))
         for g in range(MONTE_CARLO_N):
-            print "carlo %s/%s %s" % (str(t), str(len(rollout_hiddens)), str(g))
+            #print "carlo %s/%s %s" % (str(t), str(len(rollout_hiddens)), str(g))
             #time.sleep(5)
             # generate an output sequence
             # that is, run through decoder network generating output and storing probabilities
@@ -380,12 +384,12 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
         J -= torch.log(rollout_outputs[t][0][select]) * sample_est
         
         #J += torch.log(rollout_outputs[t][0][select].clamp(0.00001, 1000)) * sample_est
-        print "Jvalue %s" % str(t)
-        print J
-        print rollout_outputs[t][0][select]
-        print sample_est
+        #print "Jvalue %s" % str(t)
+        #print J
+        #print rollout_outputs[t][0][select]
+        #print sample_est
 
-    print last_inter_prefix
+    #print last_inter_prefix
 
     def clamp(message):
         #x.data.clamp_(max=100000,min=-100000)
@@ -448,6 +452,7 @@ for i in range(100):
     print "EPOCH %s" % str(i)
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
+    print len(inseq)
     j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
     print "reward"
     print j
