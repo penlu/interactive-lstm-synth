@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import init
 
-#import torch.multiprocessing as mp
+import torch.multiprocessing as mp
 
 torch.manual_seed(1)
 
@@ -28,7 +28,7 @@ e = Evaluator()
 
 torch.cuda.device(0) # let's go
 
-#pool = mp.Pool(2)
+pool = mp.Pool(4)
 
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 24
@@ -343,27 +343,40 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
                                 samp) #lambda x: x.data.topk(1)[1][0][0])
     final_sample_est = discriminator(final_sample_scores)
 
-    print "sample score %s" % str(final_sample_est)
-    print rollout_selected
+    print("sample score %s" % str(final_sample_est))
+    print(rollout_selected)
 
     assert len(rollout_hiddens) == len(rollout_outputs)
     assert len(rollout_outputs) == len(rollout_selected)
 
-    # intermediate score array, intermediate prefix array
-    inter_prefix = []
-    interactions = 0 # count of interactions we've had so far in this rollout
 
     # perform MC rollout to estimate final RL reward, in the style of SeqGAN
 
     J = 0.
+
+    # construct session prefixes
+    prefixes = []
+
+    # intermediate score array, intermediate prefix array
+    interactions = 0 # count of interactions we've had so far in this rollout
+    cur_prefix = []
     for t in range(len(rollout_hiddens)):
+        prefixes.append((interactions, cur_prefix))
+
+        cur_prefix += [rollout_selected[t]]
+        if rollout_selected[t] == EOS:
+            interactions += 1
+            cur_prefix = []
+
+    for t in range(len(rollout_hiddens)):
+        interactions = prefixes[t][0]
 
         # re-prepare input slice
         mc_inlen = rollout_inlens[interactions]
         mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
                                long_zeros_in[mc_inlen:]], dim=0)
         sample_est = 0.
-        print "carlo %s/%s" % (str(t), str(len(rollout_hiddens)))
+        print("carlo %s/%s" % (str(t), str(len(rollout_hiddens))))
         for g in range(MONTE_CARLO_N):
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
@@ -371,8 +384,8 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
-                                    rollout_hiddens[t], Variable(torch.LongTensor([[select]]).cuda(), requires_grad=False), inter_prefix[:],
-                                    [], [], [],
+                                    rollout_hiddens[t], Variable(torch.LongTensor([[select]]).cuda(), requires_grad=False),
+                                    prefixes[t][1], [], [], [],
                                     [mc_inlen], mc_inputs,
                                     samp)
             sample_est += discriminator(sample_scores)
@@ -381,11 +394,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         J -= torch.log(rollout_outputs[t][0][select]) * sample_est
         
-        inter_prefix += [rollout_selected[t]]
-
-        if rollout_selected[t] == EOS:
-            interactions += 1
-            inter_prefix = []
 
         #print "Jvalue %s" % str(t)
         #print J
@@ -437,14 +445,12 @@ inseq = [SOS, 2, 2, 18, 2, 7, 19,
               2, 5, 19, 3, 15, 19, EOS]
 
 # seqGAN training step
-for i in range(100):
-    print "EPOCH %s" % str(i)
+for i in range(1000):
+    print("EPOCH %s" % str(i))
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
-    print len(inseq)
     j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
-    print "reward"
-    print j
+    print("reward: %s" % str(j))
     #print "outputs start"
     #for i in range(len(outs)):
     #  print "outputs %s" % str(i)

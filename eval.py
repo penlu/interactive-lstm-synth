@@ -146,8 +146,8 @@ class Evaluator:
 
   def read_odom(self):
     avg = self.tottime / self.odometer
-    print self.odometer
-    print self.tottime
+    print(self.odometer)
+    print(self.tottime)
     self.tottime = 0
     self.odometer = 0
     return avg
