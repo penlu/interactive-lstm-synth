@@ -16,6 +16,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import init
 
+#import torch.multiprocessing as mp
+
 torch.manual_seed(1)
 
 
@@ -25,6 +27,8 @@ EOS = 1
 e = Evaluator()
 
 torch.cuda.device(0) # let's go
+
+#pool = mp.Pool(2)
 
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 24
@@ -162,14 +166,13 @@ class Decoder(nn.Module):
             1. input (1,1): if no teacher_forcing, this corresponds to the last output of the RNN
             2. hidden : previous hidden layer state
         """
-        output = self.embedding(inputs).view(1,1,-1)
-        outputs_dict = {}
-        for i in range(self.num_layers):
-            #output = F.relu(inp) # not necessary
-            output = F.leaky_relu(output)
-            output, hidden = self.rnn(output, hidden)
-            
+        embedding = self.embedding(inputs).view(1,1,-1)
+        #for i in range(self.num_layers):
+        #    output = F.leaky_relu(output)
+        #    output, hidden = self.rnn(output, hidden)
+        output, hidden = self.rnn(embedding, hidden)
         output = F.softmax(self.out(output[0]))
+
         self.hidden = hidden
         return output, hidden
     
@@ -300,24 +303,15 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     """
     both input_sequence and target_sequence should be variables
     """
-    #input_length = input_sequence.size()[0]
-    #target_length = max_out_seq_len #target_sequence.size()[0]
-
     #encoder_outputs = Variable(torch.zeros(max_in_seq_length, encoder.hidden_size))
     #inputs = Variable(torch.zeros(max_in_seq_length))
     #inputs[:len(input_sequence)] = input_sequence
-
-    # initial encoder hidden input: zero
-    #encoder_hidden = Variable(torch.zeros(encoder.hidden_dim)).cuda()
-    #encoder_h0 = Variable(torch.zeros(encoder.num_layers, 1, encoder.hidden_dim).cuda())
-    #encoder_c0 = Variable(torch.zeros(encoder.num_layers, 1, encoder.hidden_dim).cuda())
-    #encoder_hidden = (encoder_h0, encoder_c0)
 
 
     # init target
     f = e.eval_init(target_sequence)
 
-    # initialize encoder
+    # initialize encoder hidden state
     encoder_hidden = encoder.init_hidden()
 
     # reformat input
@@ -348,8 +342,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
                                 samp) #lambda x: x.data.topk(1)[1][0][0])
     final_sample_est = discriminator(final_sample_scores)
 
-    # TODO modify rest for matrix inputs
-
     print "sample score %s" % str(final_sample_est)
     print rollout_selected
 
@@ -357,13 +349,11 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     assert len(rollout_outputs) == len(rollout_selected)
 
     # intermediate score array, intermediate prefix array
-    #inter_scores = []
     inter_prefix = []
     interactions = 0 # count of interactions we've had so far in this rollout
-    #tokens_already = 0 # if we're in the middle of an instance
 
     # perform MC rollout to estimate final RL reward, in the style of SeqGAN
-    #J = rollout_outputs[-1] * final_sample_est # accounted for by last loop
+
     J = 0.
     for t in range(len(rollout_hiddens)):
 
@@ -371,26 +361,18 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         if rollout_selected[t] == EOS:
             interactions += 1
-            #tokens_already = 0
-            #inter_scores.append(scores[interactions - 1])
-            #last_inter_prefix = inter_prefix
             inter_prefix = []
 
+        # re-prepare input slice
+        mc_inlen = rollout_inlens[interactions]
+        mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
+                               long_zeros_in[mc_inlen:]], dim=0)
         sample_est = 0.
         print "carlo %s/%s" % (str(t), str(len(rollout_hiddens)))
         for g in range(MONTE_CARLO_N):
-            #print "carlo %s/%s %s" % (str(t), str(len(rollout_hiddens)), str(g))
-            #time.sleep(5)
-            # generate an output sequence
-            # that is, run through decoder network generating output and storing probabilities
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
             select = samp(rollout_outputs[t])
-
-            # re-prepare input slice
-            mc_inlen = rollout_inlens[interactions]
-            mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
-                                   long_zeros_in[mc_inlen:]], dim=0)
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
@@ -404,16 +386,12 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
         J -= torch.log(rollout_outputs[t][0][select]) * sample_est
         
-        #J += torch.log(rollout_outputs[t][0][select].clamp(0.00001, 1000)) * sample_est
         #print "Jvalue %s" % str(t)
         #print J
         #print rollout_outputs[t][0][select]
         #print sample_est
 
-    #print last_inter_prefix
-
     def clamp(message):
-        #x.data.clamp_(max=100000,min=-100000)
         def _internal(x):
             #print message
             m = max(torch.norm(x.data) / 100000, 1)
@@ -427,13 +405,6 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
         rollout_hiddens[i][1].register_hook(clamp("hidden c %s grad" % str(i)))
 
     J.backward()
-
-    #nn.utils.clip_grad_norm(encoder.parameters(),100000)
-    #nn.utils.clip_grad_norm(decoder.parameters(),100000)
-
-    #nn.utils.clip_grad_norm(rollout_outputs, 100000)
-    #nn.utils.clip_grad_norm([x[0] for x in rollout_hiddens], 100000)
-    #nn.utils.clip_grad_norm([x[1] for x in rollout_hiddens], 100000)
 
     return J, rollout_outputs, rollout_hiddens
 
@@ -454,9 +425,8 @@ learning_rate = 0.001
 encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 
+# TODO
 
-#nn.utils.clip_grad_norm(encoder.parameters(), 100000)
-#nn.utils.clip_grad_norm(decoder.parameters(), 100000)
 
 # encode single target input for seqGAN
 
