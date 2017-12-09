@@ -439,7 +439,7 @@ def train_single(encoder, decoder, input_sequence, max_in_seq_length=MAX_IN_SEQ_
     #    return - torch.log(rollout_outputs[t][0][select]) * sample_est
         #J -= torch.log(rollout_outputs[t][0][select]) * sample_est
 
-    J = sum(pool.imap_unordered(q_est, prefixes, chunksize=4))
+    J = sum(pool.imap_unordered(q_est, prefixes, chunksize=2))
 
     def clamp(message):
         def _internal(x):
@@ -489,7 +489,7 @@ inseq = [SOS, 2, 2, 18, 2, 7, 19,
 if __name__ == "__main__":
     mp.set_start_method('forkserver')
 
-    pool = mp.Pool(3)
+    pool = mp.Pool(2)
 
     for i in range(4):
         print("EPOCH %s" % str(i))
