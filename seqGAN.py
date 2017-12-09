@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import init
 
-import torch.multiprocessing as mp
+#import torch.multiprocessing as mp
 
 torch.manual_seed(1)
 
@@ -28,7 +28,7 @@ e = Evaluator()
 
 torch.cuda.device(0) # let's go
 
-pool = mp.Pool(4)
+#pool = mp.Pool(4)
 
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 24
@@ -260,7 +260,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         # update inputs
         curlen = inlens[-1]
         newlen = curlen + new_example.size()[0]
-        inlens += [newlen]
+        inlens.append(newlen)
         inputs[curlen:newlen] = new_example
 
         rest_interactions -= 1
@@ -294,7 +294,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         # update inputs
         curlen = inlens[-1]
         newlen = curlen + new_example.size()[0]
-        inlens += [newlen]
+        inlens.append(newlen)
         inputs[curlen:newlen] = new_example
 
     return scores_so_far
@@ -363,7 +363,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     for t in range(len(rollout_hiddens)):
         prefixes.append((interactions, cur_prefix))
 
-        cur_prefix += [rollout_selected[t]]
+        cur_prefix.append(rollout_selected[t])
         if rollout_selected[t] == EOS:
             interactions += 1
             cur_prefix = []
