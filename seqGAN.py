@@ -363,7 +363,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
                 v = torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0]
                 return v
 
-            select = samp(rollout_outputs[t])
+            select = samp(torch.log(rollout_outputs[t]))
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
@@ -378,23 +378,24 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
         J += torch.log(rollout_outputs[t][0][select]) * sample_est
         
         #J += torch.log(rollout_outputs[t][0][select].clamp(0.00001, 1000)) * sample_est
-        #print J
+        print "Jvalue %s" % str(t)
+        print J
 
     print last_inter_prefix
 
     def clamp(message):
         #x.data.clamp_(max=100000,min=-100000)
         def _internal(x):
-            #print message
-            #print x
+            print message
             m = max(torch.norm(x.data) / 100000, 1)
+            print x / m
             return x / m
         return _internal
 
     for i in range(len(rollout_hiddens)):
-        rollout_outputs[i].register_hook(clamp("output %s" % str(i)))
-        rollout_hiddens[i][0].register_hook(clamp("hidden h %s" % str(i)))
-        rollout_hiddens[i][1].register_hook(clamp("hidden c %s" % str(i)))
+        rollout_outputs[i].register_hook(clamp("output %s grad" % str(i)))
+        rollout_hiddens[i][0].register_hook(clamp("hidden h %s grad" % str(i)))
+        rollout_hiddens[i][1].register_hook(clamp("hidden c %s grad" % str(i)))
 
     J.backward()
 
@@ -405,7 +406,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #nn.utils.clip_grad_norm([x[0] for x in rollout_hiddens], 100000)
     #nn.utils.clip_grad_norm([x[1] for x in rollout_hiddens], 100000)
 
-    return J
+    return J, rollout_outputs, rollout_hiddens
 
 def discriminator(scores):
     return sum(scores)
@@ -414,7 +415,7 @@ def discriminator(scores):
 encoder = Encoder(22, 100, 100, 3).cuda()
 decoder = Decoder(14, 100, num_layers=3).cuda()
 
-learning_rate = 0.001
+learning_rate = 1
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
@@ -443,9 +444,29 @@ for i in range(100):
     print "EPOCH %s" % str(i)
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
-    train_single(encoder, decoder, inseq, "BCDCDCDC")
+    j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
+    print "outputs start"
+    for i in range(len(outs)):
+      print "outputs %s" % str(i)
+      print outs[i]
+    print "hiddens h start"
+    for i in range(len(hids)):
+      print "hiddens h %s" % str(i)
+      print hids[i][0]
+    print "hiddens c start"
+    for i in range(len(outs)):
+      print "hiddens c %s" % str(i)
+      print hids[i][1]
+    print "encoder params and grads"
+    for i in encoder.parameters():
+      print i
+      print i.grad
+    print "decoder params and grads"
+    for i in decoder.parameters():
+      print i
+      print i.grad
     #print decoder.parameters().next()
-    print decoder.parameters().next().grad
+    #print decoder.parameters().next().grad
     encoder_optimizer.step()
     decoder_optimizer.step()
 
