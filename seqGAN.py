@@ -381,16 +381,25 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
         for g in range(MONTE_CARLO_N):
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            select = samp(rollout_outputs[t])
-            #v = torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0]
+            distro = torch.exp(rollout_outputs[t])
+            select = torch.multinomial(distro, 2, replacement=False).data.cpu().numpy()[0]
 
-            sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
-                                    f, scores[:interactions],
-                                    rollout_hiddens[t], Variable(tokens[select], requires_grad=False),
-                                    prefixes[t][1], [], [], [],
-                                    [mc_inlen], mc_inputs,
-                                    samp)
-            sample_est += rollout_outputs[t][0][select] * discriminator(sample_scores)
+            tot_est = 0.
+            tot_density = 0.
+            for e in range(2):
+                sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
+                                        f, scores[:interactions],
+                                        rollout_hiddens[t], Variable(tokens[select[e]], requires_grad=False),
+                                        prefixes[t][1], [], [], [],
+                                        [mc_inlen], mc_inputs,
+                                        samp)
+
+                density = distro[0][select[e]].data.cpu().numpy()[0].item() # yes, we screen the gradient
+
+                tot_est += rollout_outputs[t][0][select[e]] * discriminator(sample_scores) * density
+                tot_density += density
+
+            sample_est += tot_est / tot_density
 
         J -= sample_est / MONTE_CARLO_N
         
