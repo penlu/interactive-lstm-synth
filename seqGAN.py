@@ -453,7 +453,7 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 
 
 # seqGAN training step
-for epoch in range(1):
+for epoch in range(10):
     print("EPOCH %s" % str(epoch))
 
     # zero gradients
