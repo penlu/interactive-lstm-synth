@@ -35,7 +35,8 @@ tokens = [torch.LongTensor([[x]]).cuda() for x in range(22)]
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 6
 MAX_INTERACTIONS = 6
-MONTE_CARLO_N = 4
+MONTE_CARLO_N = 6
+EXP_SUBSAMPLE = 6
 class Encoder(nn.Module):
     r"""
     Embeds an input sequence (in our case consisting of input-output pairs)
@@ -376,17 +377,17 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
         mc_inlen = rollout_inlens[interactions]
         mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
                                long_zeros_in[mc_inlen:]], dim=0)
-        sample_est = 0.
         print("carlo %s/%s" % (str(t), str(len(rollout_hiddens))))
-        for g in range(MONTE_CARLO_N):
-            # compute Q(rollout_hiddens[t], rollout_selected[t])
 
-            distro = torch.exp(rollout_outputs[t])
-            select = torch.multinomial(distro, 2, replacement=False).data.cpu().numpy()[0]
+        distro = torch.exp(rollout_outputs[t])
+        select = torch.multinomial(distro, EXP_SUBSAMPLE, replacement=False).data.cpu().numpy()[0]
+        tot_est = 0.
+        tot_density = 0.
+        for e in range(EXP_SUBSAMPLE):
 
-            tot_est = 0.
-            tot_density = 0.
-            for e in range(2):
+            sample_est = 0.
+            for g in range(MONTE_CARLO_N):
+                # compute Q(rollout_hiddens[t], rollout_selected[t])
                 sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                         f, scores[:interactions],
                                         rollout_hiddens[t], Variable(tokens[select[e]], requires_grad=False),
@@ -394,16 +395,18 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
                                         [mc_inlen], mc_inputs,
                                         samp)
 
-                density = distro[0][select[e]].data.cpu().numpy()[0].item() # yes, we screen the gradient
+                sample_est += rollout_outputs[t][0, select[e]] * discriminator(sample_scores)
+                #print "    DEBUG %s %s" % (str(g), str(e))
+                #print rollout_outputs[t][0, select[e]]
+                #print discriminator(sample_scores)
+                #print density
 
-                tot_est += rollout_outputs[t][0][select[e]] * discriminator(sample_scores) * density
-                tot_density += density
+            density = distro[0][select[e]].data.cpu().numpy()[0].item() # yes, we screen the gradient
 
-            sample_est += tot_est / tot_density
+            tot_est += sample_est / MONTE_CARLO_N * density
+            tot_density += density
 
-        J -= sample_est / MONTE_CARLO_N
-        
-
+        J -= tot_est / tot_density
         #print "Jvalue %s" % str(t)
         #print J
         #print rollout_outputs[t][0][select]
@@ -425,7 +428,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     return J, rollout_outputs, rollout_hiddens
 
 def discriminator(scores):
-    return sum(scores)
+    return sum(scores) + 300 * (MAX_INTERACTIONS - len(scores))
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
