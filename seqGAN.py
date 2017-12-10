@@ -382,6 +382,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
             # compute Q(rollout_hiddens[t], rollout_selected[t])
 
             select = samp(rollout_outputs[t])
+            #v = torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0]
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
@@ -389,11 +390,9 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
                                     prefixes[t][1], [], [], [],
                                     [mc_inlen], mc_inputs,
                                     samp)
-            sample_est += discriminator(sample_scores)
+            sample_est += rollout_outputs[t][0][select] * discriminator(sample_scores)
 
-        sample_est = sample_est / MONTE_CARLO_N
-
-        J -= rollout_outputs[t][0][select] * sample_est
+        J -= sample_est / MONTE_CARLO_N
         
 
         #print "Jvalue %s" % str(t)
@@ -460,7 +459,7 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 pre_loss = torch.nn.NLLLoss(ignore_index=14)
 
 PRE_BATCHSIZE=300
-for epoch in range(500):
+for epoch in range(200):
     print("PRE EPOCH %s" % str(epoch + 1))
 
     # zero gradients
@@ -508,7 +507,7 @@ for epoch in range(500):
         # 3. decoder recurrent loop
         outputs = []
         for i in range(MAX_OUT_SEQ_LEN + 1):
-            decoder_output, decoder_hidden = decoder(Variable(epoch_Yi[i,:,:], requires_grad=False), decoder_hidden)
+            decoder_output, decoder_hidden = decoder(Variable(epoch_Yi[i, start:end ,:], requires_grad=False), decoder_hidden)
 
             outputs.append(decoder_output)
 
@@ -519,7 +518,7 @@ for epoch in range(500):
         # 4. finish off outputs
         outputs = torch.stack(outputs, dim=0)
 
-        loss += sum([pre_loss(outputs[:, bi, :], Variable(epoch_Ys[:, bi, 0], requires_grad=False)) for bi in range(bsize)])
+        loss += sum([pre_loss(outputs[:, bi, :], Variable(epoch_Ys[:, start+bi, 0], requires_grad=False)) for bi in range(bsize)])
 
     loss.backward()
     print "    loss %s" % str(loss.data.cpu().numpy()[0])
