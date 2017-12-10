@@ -453,6 +453,8 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 
 
 # seqGAN training step
+in_sample = range(256)
+data_sample = range(len(data))
 for epoch in range(10):
     print("EPOCH %s" % str(epoch))
 
@@ -460,24 +462,26 @@ for epoch in range(10):
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
+    # sample data
+    random.shuffle(data_sample)
+
     J = 0.
-    in_sample = range(256)
-    for d in range(len(data)):
-        print("EPOCH %s DATA %s/%s" % (str(epoch), str(d), str(len(data))))
+    for d in range(7):
+        print("EPOCH %s DATA %s/7" % (str(epoch), str(d)))
 
         # prepare inputs
         random.shuffle(in_sample) # pick which I/O pairs to provide
         inseq = [SOS]
         for i in range(5):
             samp_in = in_sample[i]
-            samp_out = data[d][1][samp_in]
+            samp_out = data[data_sample[d]][1][samp_in]
             inseq.extend([samp_in /16+2,samp_in %16+2, 18,
                           samp_out/16+2,samp_out%16+2, 19])
         inseq.append(EOS)
         print inseq
 
         # get rewards on each input
-        J_single, outs, hids = train_single(encoder, decoder, inseq, data[d][0])
+        J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][0])
 
         print("  REWARD %s" % str(J_single))
 
