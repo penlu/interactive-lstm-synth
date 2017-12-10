@@ -47,7 +47,6 @@ class Encoder(nn.Module):
         2. embedding_dim (int): dimension of the embedding
         3. hidden_dim (int): dimensionality of the hidden vectors
         4. num_layers (int): number of hidden layers
-        5. max_seq_len (int): maximum size of the sequence (*TODO - make unnecessary)
 
     TODO:
         1. Make batching neater
@@ -57,7 +56,7 @@ class Encoder(nn.Module):
         4. Make Bi-Directional LSTM
     """
 
-    def __init__(self, vocab_dim, embedding_dim, hidden_dim, num_layers, max_seq_len=MAX_IN_SEQ_LEN, rnn='LSTM'):
+    def __init__(self, vocab_dim, embedding_dim, hidden_dim, num_layers, rnn='LSTM'):
 
         super(Encoder, self).__init__() # blindly do this
 
@@ -67,7 +66,6 @@ class Encoder(nn.Module):
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.max_seq_len = max_seq_len
 
         # layers
         self.embedding = nn.Embedding(self.vocab_dim, self.embedding_dim)
@@ -101,7 +99,8 @@ class Encoder(nn.Module):
 
         if variable_length==False:
             #seq_len = inputs.size()[0]
-            embedded = self.embedding(inputs.view(inputs.size()[0], 1)).view(inputs.size()[0],1,-1)
+            embedded = self.embedding(inputs.squeeze())\
+                                .view(inputs.size()[0],inputs.size()[1],-1)
             output, hidden = self.rnn(embedded, hidden)
 
         elif variable_length==True:
@@ -114,7 +113,7 @@ class Encoder(nn.Module):
 
         return output, hidden
 
-    def init_hidden(self):
+    def init_hidden(self, batches=1):
         r"""
         Initialized hidden vector/cell-states. Given that weight initializations are crucial, we experiment with
         the Xavier Normal Initialization/Glorot Initialization.
@@ -125,8 +124,8 @@ class Encoder(nn.Module):
         """
         if self.type == 'LSTM':
             # dim = [num_layers*num_directions, batch, hidden_size]
-            h0 = torch.Tensor(self.num_layers, 1, self.hidden_dim).cuda()
-            c0 = torch.Tensor(self.num_layers, 1, self.hidden_dim).cuda()
+            h0 = torch.Tensor(self.num_layers, batches, self.hidden_dim).cuda()
+            c0 = torch.Tensor(self.num_layers, batches, self.hidden_dim).cuda()
 
             # initializations
             h0, c0 = init.xavier_normal(h0), init.xavier_normal(c0)
@@ -134,7 +133,7 @@ class Encoder(nn.Module):
             return Variable(h0), Variable(c0)
 
         elif self.type == 'GRU':
-            h = torch.Tensor(self.num_layers, 1, self.hidden_size)
+            h = torch.Tensor(self.num_layers, batches, self.hidden_size)
             h = init.xavier_normal(h)
 
             return Variable(h)
@@ -168,12 +167,13 @@ class Decoder(nn.Module):
             1. input (1,1): if no teacher_forcing, this corresponds to the last output of the RNN
             2. hidden : previous hidden layer state
         """
-        embedding = self.embedding(inputs).view(1,1,-1)
+        embedded = self.embedding(inputs.view(1, inputs.size()[1]))\
+                            .view(1, inputs.size()[1], -1)
         #for i in range(self.num_layers):
         #    output = F.leaky_relu(output)
         #    output, hidden = self.rnn(output, hidden)
-        output, hidden = self.rnn(embedding, hidden)
-        output = F.softmax(self.out(output[0]))
+        output, hidden = self.rnn(embedded, hidden)
+        output = F.softmax(self.out(output[0])) # TODO strip softmax, propagate elsewhere w/ logsoftmax
 
         self.hidden = hidden
         return output, hidden
@@ -204,6 +204,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
     decoder_hidden = start_hidden
     decoder_input = start_input
 
+    next_i = start_input.data.cpu().numpy()[0][0]
     for di in range(max_length - len(prefix)):
         # recall decoder hidden state for future rollout
         hiddens.append(decoder_hidden)
@@ -219,17 +220,16 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         selected.append(next_i)
         prefix.append(next_i)
 
-        if next_i == EOS:
+        if next_i == SOS:
             break
     else:
-        # hit it with the fact that it's over---not the previous output
         hiddens.append(decoder_hidden)
-        decoder_output, decoder_hidden = decoder(Variable(tokens[EOS], requires_grad=False),
+        decoder_output, decoder_hidden = decoder(Variable(tokens[next_i], requires_grad=False),
                                                     decoder_hidden)
 
         outputs.append(decoder_output)
-        selected.append(EOS)
-        prefix.append(EOS)
+        selected.append(SOS)
+        prefix.append(SOS)
 
     return prefix, decoder_hidden
 
@@ -302,6 +302,10 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
 
     return scores_so_far
 
+def samp(x):
+    v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
+    return v
+
 # a single input sequence, a single target output sequence, and we run
 def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
@@ -329,10 +333,6 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     rollout_selected = [] # rollout_selected[t] = y_t
     rollout_inputs = inputs #input_sequence[:] # stuff what goes to the encoder
     rollout_inlens = [len(input_sequence)]
-
-    def samp(x):
-        v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
-        return v
 
     # perform a single full unroll
     final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
@@ -364,7 +364,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
         prefixes.append((interactions, cur_prefix))
 
         cur_prefix.append(rollout_selected[t])
-        if rollout_selected[t] == EOS:
+        if rollout_selected[t] == SOS:
             interactions += 1
             cur_prefix = []
 
@@ -440,23 +440,107 @@ for l in dat:
 
     in_data = [int(p[1][2*b:2*b+2], base=16) for b in range(256)]
 
-    data.append((targ_prog_f, in_data))
+    data.append((targ_prog, in_data, targ_prog_f))
 
 dat.close()
 
 
+# shuffled lists for data sampling
+in_sample = range(256)
+data_sample = range(len(data))
+
+
 # PRE-TRAIN
+NSAMPLES=5
+
 encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 
-# TODO
+pre_loss = torch.nn.NLLLoss()
 
+PRE_BATCHSIZE=300
+for epoch in range(100):
+    print("PRE EPOCH %s" % str(epoch + 1))
+
+    # zero gradients
+    encoder_optimizer.zero_grad()
+    decoder_optimizer.zero_grad()
+
+    # prepare data for epoch
+    epoch_Xs = []
+    epoch_Ys = []
+    lookup = {'@': 0,         'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6,
+              'F': 7, 'G': 8, 'H': 9, 'I':10, 'J':11, 'K':12, 'L': 13}
+    for d in range(len(data)):
+        random.shuffle(in_sample)
+        inseq = [tokens[SOS]]
+        for i in range(NSAMPLES):
+            samp_in = in_sample[i]
+            samp_out = data[data_sample[d]][1][samp_in]
+            inseq.extend([tokens[samp_in /16+2], tokens[samp_in %16+2], tokens[18],
+                          tokens[samp_out/16+2], tokens[samp_out%16+2], tokens[19]])
+        inseq.append(tokens[EOS])
+        epoch_Xs.append(torch.cat(inseq, dim=0))
+
+        outseq = [tokens[lookup[c]] for c in data[data_sample[d]][0]]
+        outseq.append(tokens[SOS])
+        outseq.extend([tokens[SOS]] * (MAX_OUT_SEQ_LEN + 1 - len(outseq)))
+        epoch_Ys.append(torch.cat(outseq, dim=0))
+
+    epoch_Xs = torch.stack(epoch_Xs, dim=1)
+    epoch_Ys = torch.stack(epoch_Ys, dim=1)
+
+    print epoch_Xs.size()
+    print epoch_Ys.size()
+
+    # model forward compute
+    for b in range(epoch_Xs.size()[1] / PRE_BATCHSIZE + 1):
+        start, end = b * PRE_BATCHSIZE, min((b + 1) * PRE_BATCHSIZE, epoch_Xs.size()[1])
+        bsize = end - start
+
+        # 1. initialize encoder hidden state
+        encoder_hidden = encoder.init_hidden(batches=bsize)
+
+        # 2. encoder forward compute
+        _, decoder_hidden = encoder(Variable(epoch_Xs[:, start:end, :]), encoder_hidden)
+        decoder_input = Variable(tokens[SOS].repeat(1, bsize, 1))
+
+        # 3. decoder recurrent loop
+        outputs = []
+        long_zeros = torch.LongTensor(1, bsize, 1).cuda().zero_()
+        long_ones = torch.LongTensor(1, bsize, 1).cuda().fill_(1L)
+
+        still_going = long_ones.clone()
+        for i in range(MAX_OUT_SEQ_LEN):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+            print decoder_output.size()
+
+            outputs.append(decoder_output)
+
+            # recalculate next input
+            # TODO implement teacher forcing
+            decoder_input = torch.multinomial(decoder_output, 1).view(1, -1, 1)
+
+            # zero those sequences that have ended
+            nonzeros = torch.nonzero(decoder_input.data)[:, 1]
+
+            now_going = long_zeros.clone()
+            now_going.index_fill_(1, nonzeros, 1L)
+            still_going = torch.mul(still_going, now_going)
+
+            decoder_input = torch.mul(decoder_input, still_going)
+
+        # 4. finish off outputs
+        outputs = torch.cat(outputs, dim=0)
+        outputs = torch.cat([outputs, torch.zeros(outputs.size()[0], 1, outputs.size()[2])], dim=1)
+        print outputs
+        break
+    break
 
 # seqGAN training step
-in_sample = range(256)
-data_sample = range(len(data))
-for epoch in range(10):
-    print("EPOCH %s" % str(epoch))
+RL_BATCHSIZE=4
+for epoch in range(100):
+    print("RL EPOCH %s" % str(epoch))
 
     # zero gradients
     encoder_optimizer.zero_grad()
@@ -466,24 +550,24 @@ for epoch in range(10):
     random.shuffle(data_sample)
 
     J = 0.
-    for d in range(7):
-        print("EPOCH %s DATA %s/7" % (str(epoch), str(d)))
+    for d in range(RL_BATCHSIZE):
+        print("RL EPOCH %s DATA %s/%s" % (str(epoch + 1), str(d + 1), RL_BATCHSIZE))
 
         # prepare inputs
         random.shuffle(in_sample) # pick which I/O pairs to provide
         inseq = [SOS]
-        for i in range(5):
+        for i in range(NSAMPLES):
             samp_in = in_sample[i]
             samp_out = data[data_sample[d]][1][samp_in]
             inseq.extend([samp_in /16+2,samp_in %16+2, 18,
                           samp_out/16+2,samp_out%16+2, 19])
         inseq.append(EOS)
-        print inseq
+        print "  DATA %s" % str(inseq)
 
         # get rewards on each input
-        J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][0])
+        J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][2])
 
-        print("  REWARD %s" % str(J_single))
+        print("  REWARD %s" % str(J_single.data.cpu().numpy()[0]))
 
         J += J_single
 

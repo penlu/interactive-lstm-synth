@@ -95,14 +95,14 @@ class Evaluator:
       assert os.read(self.fr_eval, 1) == NUL
       #return ('!', pos)
       retval = ('!', pos)
-      return (1., _stackl([20, int(pos)/16+2, int(pos)%16+2, 1]))
+      return (-0.1, _stackl([20, int(pos)/16+2, int(pos)%16+2, 1]))
     elif res == '?':
       # stack overflow at termination, count...
       cnt = ord(os.read(self.fr_eval, 1))
       assert os.read(self.fr_eval, 1) == NUL
       #return ('?', cnt)
       retval = ('?', cnt)
-      return (1., _stackl([21, int(cnt)/16+2, int(cnt)%16+2, 1]))
+      return (-0.1, _stackl([21, int(cnt)/16+2, int(cnt)%16+2, 1]))
     elif res == '#':
       # incorrect outputs
       cnt = ord(os.read(self.fr_eval, 1))
@@ -129,7 +129,7 @@ class Evaluator:
       return (100000., torch.LongTensor([[1]]))
 
   def _candquery(self, ID):
-    lookup = ['@', chr(0), 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+    lookup = [chr(0), '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
     def inner(prog):
       prog = "".join([lookup[x] for x in prog])
       #print prog
