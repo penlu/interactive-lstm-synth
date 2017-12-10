@@ -158,6 +158,7 @@ class Decoder(nn.Module):
         #elif self.type=='GRU':
         #    self.rnn = nn.GRU(self.hidden_dim, self.hidden_dim, self.num_layers)
         self.out = nn.Linear(hidden_dim, vocab_dim)
+        self.softmax = nn.LogSoftmax()
         
     def forward(self, inputs, hidden):
         r"""
@@ -167,13 +168,13 @@ class Decoder(nn.Module):
             1. input (1,1): if no teacher_forcing, this corresponds to the last output of the RNN
             2. hidden : previous hidden layer state
         """
-        embedded = self.embedding(inputs.view(1, inputs.size()[1]))\
-                            .view(1, inputs.size()[1], -1)
+        embedded = self.embedding(inputs.view(1, -1))\
+                            .view(1, -1, self.hidden_dim)
         #for i in range(self.num_layers):
         #    output = F.leaky_relu(output)
         #    output, hidden = self.rnn(output, hidden)
         output, hidden = self.rnn(embedded, hidden)
-        output = F.softmax(self.out(output[0])) # TODO strip softmax, propagate elsewhere w/ logsoftmax
+        output = self.softmax(self.out(output[0]))
 
         self.hidden = hidden
         return output, hidden
@@ -303,7 +304,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
     return scores_so_far
 
 def samp(x):
-    v = torch.multinomial(x, 1).data.cpu().numpy()[0][0]
+    v = torch.multinomial(torch.exp(x), 1).data.cpu().numpy()[0][0]
     return v
 
 # a single input sequence, a single target output sequence, and we run
@@ -392,7 +393,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
 
         sample_est = sample_est / MONTE_CARLO_N
 
-        J -= torch.log(rollout_outputs[t][0][select]) * sample_est
+        J -= rollout_outputs[t][0][select] * sample_est
         
 
         #print "Jvalue %s" % str(t)
@@ -456,10 +457,10 @@ NSAMPLES=5
 encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 
-pre_loss = torch.nn.NLLLoss()
+pre_loss = torch.nn.NLLLoss(ignore_index=14)
 
 PRE_BATCHSIZE=300
-for epoch in range(100):
+for epoch in range(1000):
     print("PRE EPOCH %s" % str(epoch + 1))
 
     # zero gradients
@@ -468,8 +469,9 @@ for epoch in range(100):
 
     # prepare data for epoch
     epoch_Xs = []
+    epoch_Yi = []
     epoch_Ys = []
-    lookup = {'@': 0,         'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6,
+    lookup = {'@': 1,         'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6,
               'F': 7, 'G': 8, 'H': 9, 'I':10, 'J':11, 'K':12, 'L': 13}
     for d in range(len(data)):
         random.shuffle(in_sample)
@@ -483,17 +485,15 @@ for epoch in range(100):
         epoch_Xs.append(torch.cat(inseq, dim=0))
 
         outseq = [tokens[lookup[c]] for c in data[data_sample[d]][0]]
-        outseq.append(tokens[SOS])
-        outseq.extend([tokens[SOS]] * (MAX_OUT_SEQ_LEN + 1 - len(outseq)))
-        epoch_Ys.append(torch.cat(outseq, dim=0))
+        epoch_Yi.append(torch.cat([tokens[SOS]] + outseq + [tokens[0]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
+        epoch_Ys.append(torch.cat(outseq + [tokens[SOS]] + [tokens[14]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
 
     epoch_Xs = torch.stack(epoch_Xs, dim=1)
+    epoch_Yi = torch.stack(epoch_Yi, dim=1)
     epoch_Ys = torch.stack(epoch_Ys, dim=1)
 
-    print epoch_Xs.size()
-    print epoch_Ys.size()
-
     # model forward compute
+    loss = 0.
     for b in range(epoch_Xs.size()[1] / PRE_BATCHSIZE + 1):
         start, end = b * PRE_BATCHSIZE, min((b + 1) * PRE_BATCHSIZE, epoch_Xs.size()[1])
         bsize = end - start
@@ -502,45 +502,35 @@ for epoch in range(100):
         encoder_hidden = encoder.init_hidden(batches=bsize)
 
         # 2. encoder forward compute
-        _, decoder_hidden = encoder(Variable(epoch_Xs[:, start:end, :]), encoder_hidden)
-        decoder_input = Variable(tokens[SOS].repeat(1, bsize, 1))
+        _, decoder_hidden = encoder(Variable(epoch_Xs[:, start:end, :], requires_grad=False), encoder_hidden)
+        #decoder_input = Variable(tokens[SOS].repeat(1, bsize, 1))
 
         # 3. decoder recurrent loop
         outputs = []
-        long_zeros = torch.LongTensor(1, bsize, 1).cuda().zero_()
-        long_ones = torch.LongTensor(1, bsize, 1).cuda().fill_(1L)
-
-        still_going = long_ones.clone()
-        for i in range(MAX_OUT_SEQ_LEN):
-            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-            print decoder_output.size()
+        for i in range(MAX_OUT_SEQ_LEN + 1):
+            decoder_output, decoder_hidden = decoder(Variable(epoch_Yi[i,:,:], requires_grad=False), decoder_hidden)
 
             outputs.append(decoder_output)
 
-            # recalculate next input
             # TODO implement teacher forcing
-            decoder_input = torch.multinomial(decoder_output, 1).view(1, -1, 1)
-
-            # zero those sequences that have ended
-            nonzeros = torch.nonzero(decoder_input.data)[:, 1]
-
-            now_going = long_zeros.clone()
-            now_going.index_fill_(1, nonzeros, 1L)
-            still_going = torch.mul(still_going, now_going)
-
-            decoder_input = torch.mul(decoder_input, still_going)
+            # sample next input
+            #decoder_input = torch.multinomial(torch.exp(decoder_output), 1).view(1, -1, 1)
 
         # 4. finish off outputs
-        outputs = torch.cat(outputs, dim=0)
-        outputs = torch.cat([outputs, torch.zeros(outputs.size()[0], 1, outputs.size()[2])], dim=1)
-        print outputs
-        break
-    break
+        outputs = torch.stack(outputs, dim=0)
+
+        loss += sum([pre_loss(outputs[:, bi, :], Variable(epoch_Ys[:, bi, 0], requires_grad=False)) for bi in range(bsize)])
+
+    loss.backward()
+    print "    loss %s" % str(loss.data.cpu().numpy()[0])
+
+    encoder_optimizer.step()
+    decoder_optimizer.step()
 
 # seqGAN training step
 RL_BATCHSIZE=4
 for epoch in range(100):
-    print("RL EPOCH %s" % str(epoch))
+    print("RL EPOCH %s" % str(epoch + 1))
 
     # zero gradients
     encoder_optimizer.zero_grad()
