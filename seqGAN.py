@@ -460,7 +460,7 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 pre_loss = torch.nn.NLLLoss(ignore_index=14)
 
 PRE_BATCHSIZE=300
-for epoch in range(1000):
+for epoch in range(500):
     print("PRE EPOCH %s" % str(epoch + 1))
 
     # zero gradients
