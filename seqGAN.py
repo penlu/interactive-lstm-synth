@@ -6,7 +6,9 @@ from eval import Evaluator
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
+import random
 import time
+import sys
 
 import torch
 import torch.autograd as autograd
@@ -15,8 +17,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import init
-
-#import torch.multiprocessing as mp
 
 torch.manual_seed(1)
 
@@ -28,12 +28,14 @@ e = Evaluator()
 
 torch.cuda.device(0) # let's go
 
-#pool = mp.Pool(4)
+# precompute input tokens
+tokens = [torch.LongTensor([[x]]).cuda() for x in range(22)]
+
 
 MAX_IN_SEQ_LEN = 150
-MAX_OUT_SEQ_LEN = 24
-MAX_INTERACTIONS = 4
-MONTE_CARLO_N = 2
+MAX_OUT_SEQ_LEN = 6
+MAX_INTERACTIONS = 6
+MONTE_CARLO_N = 4
 class Encoder(nn.Module):
     r"""
     Embeds an input sequence (in our case consisting of input-output pairs)
@@ -210,7 +212,7 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
         # select next decoder input
         next_i = choice_policy(decoder_output)
         
-        decoder_input = Variable(torch.LongTensor([[next_i]]).cuda(), requires_grad=False)
+        decoder_input = Variable(tokens[next_i], requires_grad=False)
 
         # save decoder behaviors
         outputs.append(decoder_output)
@@ -222,7 +224,8 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
     else:
         # hit it with the fact that it's over---not the previous output
         hiddens.append(decoder_hidden)
-        decoder_output, decoder_hidden = decoder(Variable(torch.LongTensor([[EOS]]).cuda(), requires_grad=False), decoder_hidden)
+        decoder_output, decoder_hidden = decoder(Variable(tokens[EOS], requires_grad=False),
+                                                    decoder_hidden)
 
         outputs.append(decoder_output)
         selected.append(EOS)
@@ -276,7 +279,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         # recall decoder hidden state for next encoder round
         generate, encoder_hidden = gen_prog(
                     encoder_hidden,
-                    Variable(torch.LongTensor([[SOS]]), requires_grad=False).cuda(),
+                    Variable(tokens[SOS], requires_grad=False).cuda(),
                     decoder, [],
                     hiddens, outputs, selected,
                     choice, max_out_seq_len)
@@ -300,7 +303,7 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
     return scores_so_far
 
 # a single input sequence, a single target output sequence, and we run
-def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
+def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
@@ -309,16 +312,13 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     #inputs[:len(input_sequence)] = input_sequence
 
 
-    # init target
-    f = e.eval_init(target_sequence)
-
     # initialize encoder hidden state
     encoder_hidden = encoder.init_hidden()
 
     # reformat input
     long_zeros_in = torch.LongTensor(max_in_seq_length, 1).zero_().cuda()
     inputs = long_zeros_in.clone()
-    inputs[:len(input_sequence)] = torch.stack([torch.LongTensor([x]).cuda() for x in input_sequence], dim = 0)
+    inputs[:len(input_sequence)] = torch.cat([tokens[x] for x in input_sequence], dim = 0)
 
     # score prefix
     scores = []
@@ -337,7 +337,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
     # perform a single full unroll
     final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
                                 f, scores,
-                                encoder_hidden, Variable(torch.LongTensor([[SOS]]).cuda(), requires_grad=False), [],
+                                encoder_hidden, Variable(tokens[SOS], requires_grad=False), [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
                                 rollout_inlens, rollout_inputs,
                                 samp) #lambda x: x.data.topk(1)[1][0][0])
@@ -384,7 +384,7 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
 
             sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                     f, scores[:interactions],
-                                    rollout_hiddens[t], Variable(torch.LongTensor([[select]]).cuda(), requires_grad=False),
+                                    rollout_hiddens[t], Variable(tokens[select], requires_grad=False),
                                     prefixes[t][1], [], [], [],
                                     [mc_inlen], mc_inputs,
                                     samp)
@@ -413,21 +413,36 @@ def train_single(encoder, decoder, input_sequence, target_sequence, max_in_seq_l
         rollout_hiddens[i][0].register_hook(clamp("hidden h %s grad" % str(i)))
         rollout_hiddens[i][1].register_hook(clamp("hidden c %s grad" % str(i)))
 
-    J.backward()
-
     return J, rollout_outputs, rollout_hiddens
 
 def discriminator(scores):
     return sum(scores)
 
 
-encoder = Encoder(22, 100, 100, 3).cuda()
-decoder = Decoder(14, 100, num_layers=3).cuda()
+encoder = Encoder(22, 128, 512, 3).cuda()
+decoder = Decoder(14, 512, num_layers=3).cuda()
 
 learning_rate = 0.001
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
+
+
+# load data
+data = []
+
+dat = open(sys.argv[1])
+for l in dat:
+    p = l.split()
+
+    targ_prog = p[0]
+    targ_prog_f = e.eval_init(targ_prog)
+
+    in_data = [int(p[1][2*b:2*b+2], base=16) for b in range(256)]
+
+    data.append((targ_prog_f, in_data))
+
+dat.close()
 
 
 # PRE-TRAIN
@@ -437,42 +452,40 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 # TODO
 
 
-# encode single target input for seqGAN
-
-inseq = [SOS, 2, 2, 18, 2, 7, 19,
-              2, 3, 18, 2, 15, 19,
-              2, 4, 18, 3, 7, 19,
-              2, 5, 19, 3, 15, 19, EOS]
-
 # seqGAN training step
-for i in range(1000):
-    print("EPOCH %s" % str(i))
+for epoch in range(1):
+    print("EPOCH %s" % str(epoch))
+
+    # zero gradients
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
-    j, outs, hids = train_single(encoder, decoder, inseq, "BCDCDCDC")
-    print("reward: %s" % str(j))
-    #print "outputs start"
-    #for i in range(len(outs)):
-    #  print "outputs %s" % str(i)
-    #  print outs[i]
-    #print "hiddens h start"
-    #for i in range(len(hids)):
-    #  print "hiddens h %s" % str(i)
-    #  print hids[i][0]
-    #print "hiddens c start"
-    #for i in range(len(outs)):
-    #  print "hiddens c %s" % str(i)
-    #  print hids[i][1]
-    #print "encoder params and grads"
-    #for i in encoder.parameters():
-    #  print i
-    #  print i.grad
-    #print "decoder params and grads"
-    #for i in decoder.parameters():
-    #  print i
-    #  print i.grad
-    #print decoder.parameters().next()
-    #print decoder.parameters().next().grad
+
+    J = 0.
+    in_sample = range(256)
+    for d in range(len(data)):
+        print("EPOCH %s DATA %s/%s" % (str(epoch), str(d), str(len(data))))
+
+        # prepare inputs
+        random.shuffle(in_sample) # pick which I/O pairs to provide
+        inseq = [SOS]
+        for i in range(5):
+            samp_in = in_sample[i]
+            samp_out = data[d][1][samp_in]
+            inseq.extend([samp_in /16+2,samp_in %16+2, 18,
+                          samp_out/16+2,samp_out%16+2, 19])
+        inseq.append(EOS)
+        print inseq
+
+        # get rewards on each input
+        J_single, outs, hids = train_single(encoder, decoder, inseq, data[d][0])
+
+        print("  REWARD %s" % str(J_single))
+
+        J += J_single
+
+    # grad descent
+    J.backward()
+
     encoder_optimizer.step()
     decoder_optimizer.step()
 
