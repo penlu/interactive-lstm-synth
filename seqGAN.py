@@ -35,7 +35,7 @@ tokens = [torch.LongTensor([[x]]).cuda() for x in range(22)]
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 6
 MAX_INTERACTIONS = 6
-MONTE_CARLO_N = 30
+MONTE_CARLO_N = 16
 EXP_SUBSAMPLE = 1
 class Encoder(nn.Module):
     r"""
@@ -199,14 +199,20 @@ class Decoder(nn.Module):
 
 
 # generate a program with max_length
-# the argument "prefix" contains some program prefix: we produce the rest
+# the argument "prefix" contains some program prefix that has already been output: we produce the rest
 # encoder intermediate states saved as desired, for rollout purposes
+# start_hidden, start_input: the first hidden state and input respectively
+
+# given program already, finish this interaction round with an SOS
 def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selected, choice_policy, max_length):
+    next_i = start_input.data.cpu().numpy()[0][0]
+    assert(len(prefix) <= max_length)
+    assert(len(prefix) == 0 or prefix[-1] == next_i)
+
     # initialize decoder values
     decoder_hidden = start_hidden
     decoder_input = start_input
 
-    next_i = start_input.data.cpu().numpy()[0][0]
     for di in range(max_length - len(prefix)):
         # recall decoder hidden state for future rollout
         hiddens.append(decoder_hidden)
@@ -224,7 +230,9 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
 
         if next_i == SOS:
             break
-    else:
+
+    else: # force end
+
         hiddens.append(decoder_hidden)
         decoder_output, decoder_hidden = decoder(Variable(tokens[next_i], requires_grad=False),
                                                     decoder_hidden)
@@ -242,16 +250,27 @@ def gen_prog(start_hidden, start_input, decoder, prefix, hiddens, outputs, selec
 # hiddens, output, selected will accumulate those values: don't use this for monte carlo
 # inputs is the inputs we've accumulated in this rollout, for encoder use
 # choice is the choice function: max or multinomial sampling, typically
+# start_input: next input to the generator, also last thing to come out of the generator
+
+# given some number of interactions left and what has been decided in this interaction,
+# roll it out to the end
 def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_far, start_hidden, start_input, prefix, hiddens, outputs, selected, inlens, inputs, choice):
     if len(prefix) != 0:
+        start_sym = start_input.data.cpu().numpy()[0][0]
+        assert((len(prefix) == max_out_seq_len + 1 and start_sym == SOS) or len(prefix) <= max_out_seq_len)
+        assert(prefix[-1] == start_sym)
         # in the middle of generating a program
         # finish up this round...
 
         # get generated program
         # recall decoder hidden state for next encoder round
-        generate, encoder_hidden = gen_prog(start_hidden, start_input, decoder, prefix,
-                    hiddens, outputs, selected,
-                    choice, max_out_seq_len)
+        if start_sym != SOS:
+            generate, encoder_hidden = gen_prog(start_hidden, start_input, decoder, prefix,
+                        hiddens, outputs, selected,
+                        choice, max_out_seq_len)
+        else:
+            generate = prefix
+            encoder_hidden = start_hidden
 
         # evaluator interaction
         score, new_example = f(generate)
@@ -339,7 +358,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     # perform a single full unroll
     final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, max_out_seq_len,
                                 f, scores,
-                                encoder_hidden, Variable(tokens[SOS], requires_grad=False), [],
+                                encoder_hidden, None, [],
                                 rollout_hiddens, rollout_outputs, rollout_selected,
                                 rollout_inlens, rollout_inputs,
                                 samp) #lambda x: x.data.topk(1)[1][0][0])
@@ -357,7 +376,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     J = 0.
 
     # construct session prefixes
-    prefixes = []
+    prefixes = [] # prefix[t] is before t has gone out yet
 
     # intermediate score array, intermediate prefix array
     interactions = 0 # count of interactions we've had so far in this rollout
@@ -365,22 +384,28 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     for t in range(len(rollout_hiddens)):
         prefixes.append((interactions, cur_prefix))
 
-        cur_prefix.append(rollout_selected[t])
+        cur_prefix = cur_prefix + [rollout_selected[t]]
         if rollout_selected[t] == SOS:
             interactions += 1
             cur_prefix = []
 
     for t in range(len(rollout_hiddens)):
         interactions = prefixes[t][0]
+        prefix = prefixes[t][1]
 
         # re-prepare input slice
         mc_inlen = rollout_inlens[interactions]
         mc_inputs = torch.cat([rollout_inputs[:mc_inlen],
                                long_zeros_in[mc_inlen:]], dim=0)
-        print("carlo %s/%s" % (str(t), str(len(rollout_hiddens))))
 
         distro = torch.exp(rollout_outputs[t])
-        select = torch.multinomial(distro, EXP_SUBSAMPLE, replacement=False).data.cpu().numpy()[0]
+        #select = torch.multinomial(distro, EXP_SUBSAMPLE, replacement=False).data.cpu().numpy()[0]
+        if len(prefix) < max_out_seq_len:
+            select = [rollout_selected[t]] * EXP_SUBSAMPLE
+        else:
+            select = [SOS] * EXP_SUBSAMPLE
+        assert(len(prefix) <= max_out_seq_len)
+
         tot_est = 0.
         tot_density = 0.
         for e in range(EXP_SUBSAMPLE):
@@ -388,10 +413,11 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
             sample_est = 0.
             for g in range(MONTE_CARLO_N):
                 # compute Q(rollout_hiddens[t], rollout_selected[t])
+
                 sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS - interactions, max_out_seq_len,
                                         f, scores[:interactions],
                                         rollout_hiddens[t], Variable(tokens[select[e]], requires_grad=False),
-                                        prefixes[t][1], [], [], [],
+                                        prefix + [select[e]], [], [], [],
                                         [mc_inlen], mc_inputs,
                                         samp)
 
@@ -412,6 +438,9 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
         #print rollout_outputs[t][0][select]
         #print sample_est
 
+        print("carlo %s/%s, value %s = ll %s * est %s" % (str(t + 1), str(len(rollout_hiddens)), str((tot_est / tot_density).data.cpu().numpy()[0]),
+                                                          str(rollout_outputs[t][0, select[e]].data.cpu().numpy()[0]), str(sample_est / MONTE_CARLO_N)))
+
     def clamp(message):
         def _internal(x):
             #print message
@@ -429,13 +458,13 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
 
 def discriminator(scores):
     return (sum(scores) - 25.6 * len(scores) + \
-                          (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 5000
+                          (5000 if len(scores) < MAX_INTERACTIONS else -1000)) / 5000
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
 decoder = Decoder(14, 512, num_layers=3).cuda()
 
-learning_rate = 0.0001
+learning_rate = 0.001
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
@@ -472,7 +501,7 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 pre_loss = torch.nn.NLLLoss(ignore_index=14)
 
 PRE_BATCHSIZE=300
-for epoch in range(1000):
+for epoch in range(200):
     print("PRE EPOCH %s" % str(epoch + 1))
 
     # zero gradients
@@ -540,7 +569,7 @@ for epoch in range(1000):
     decoder_optimizer.step()
 
 # seqGAN training step
-RL_BATCHSIZE=4
+RL_BATCHSIZE=8
 for epoch in range(100):
     print("RL EPOCH %s" % str(epoch + 1))
 
