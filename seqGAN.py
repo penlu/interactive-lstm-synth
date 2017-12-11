@@ -428,13 +428,14 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     return J, rollout_outputs, rollout_hiddens
 
 def discriminator(scores):
-    return sum(scores) + 50 * (MAX_INTERACTIONS - len(scores))
+    return sum(scores) + 50 * (MAX_INTERACTIONS - len(scores)) + \
+                          5000 if len(scores) < MAX_INTERACTIONS else 0
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
 decoder = Decoder(14, 512, num_layers=3).cuda()
 
-learning_rate = 0.001
+learning_rate = 0.0001
 #teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
