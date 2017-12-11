@@ -690,7 +690,7 @@ def RL_train(epochs, pre):
 
         return count
 
-MLE_pretrain(200)
+MLE_pretrain(200, 0)
 mlecount = 200
 for i in range(100):
     ct = RL_train(1, i)
