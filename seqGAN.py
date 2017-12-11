@@ -35,8 +35,8 @@ tokens = [torch.LongTensor([[x]]).cuda() for x in range(22)]
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 6
 MAX_INTERACTIONS = 6
-MONTE_CARLO_N = 6
-EXP_SUBSAMPLE = 6
+MONTE_CARLO_N = 30
+EXP_SUBSAMPLE = 1
 class Encoder(nn.Module):
     r"""
     Embeds an input sequence (in our case consisting of input-output pairs)
@@ -395,7 +395,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
                                         [mc_inlen], mc_inputs,
                                         samp)
 
-                sample_est += rollout_outputs[t][0, select[e]] * discriminator(sample_scores)
+                sample_est += discriminator(sample_scores)
                 #print "    DEBUG %s %s" % (str(g), str(e))
                 #print rollout_outputs[t][0, select[e]]
                 #print discriminator(sample_scores)
@@ -403,7 +403,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
 
             density = distro[0][select[e]].data.cpu().numpy()[0].item() # yes, we screen the gradient
 
-            tot_est += sample_est / MONTE_CARLO_N * density
+            tot_est += density * rollout_outputs[t][0, select[e]] * sample_est / MONTE_CARLO_N
             tot_density += density
 
         J -= tot_est / tot_density
@@ -428,7 +428,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     return J, rollout_outputs, rollout_hiddens
 
 def discriminator(scores):
-    return sum(scores) + 300 * (MAX_INTERACTIONS - len(scores))
+    return sum(scores) + 50 * (MAX_INTERACTIONS - len(scores))
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
@@ -540,7 +540,7 @@ for epoch in range(200):
 
 # seqGAN training step
 RL_BATCHSIZE=4
-for epoch in range(100):
+for epoch in range(20):
     print("RL EPOCH %s" % str(epoch + 1))
 
     # zero gradients
@@ -553,6 +553,7 @@ for epoch in range(100):
     J = 0.
     for d in range(RL_BATCHSIZE):
         print("RL EPOCH %s DATA %s/%s" % (str(epoch + 1), str(d + 1), RL_BATCHSIZE))
+        print data[data_sample[d]][0]
 
         # prepare inputs
         random.shuffle(in_sample) # pick which I/O pairs to provide
@@ -568,7 +569,7 @@ for epoch in range(100):
         # get rewards on each input
         J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][2])
 
-        print("  REWARD %s" % str(J_single.data.cpu().numpy()[0]))
+        print("  PUNISH %s" % str(J_single.data.cpu().numpy()[0]))
 
         J += J_single
 
