@@ -519,8 +519,8 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
     return J, rollout_outputs, rollout_hiddens, final_sample_est
 
 def discriminator(scores):
-    return (sum(scores) + #- 25.6 * len(scores) + \
-                          (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 10000
+    return (float(sum(scores)) + #- 25.6 * len(scores) + \
+                          (5000. if len(scores) < MAX_INTERACTIONS else 0.)) / 10000
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
@@ -675,6 +675,7 @@ def RL_train(epochs, pre):
 
             # get rewards on each input
             J_single, outs, hids, samp = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0])
+            print "  SAMPLED %s" % str(samp)
             if samp > 0.4:
                 count += 1
 
@@ -695,6 +696,6 @@ mlecount = 200
 for i in range(100):
     ct = RL_train(1, i)
     if ct <= 2:
-        print "RETRAINING MLE"
+        print "RETRAINING MLE, COUNT %s" % str(ct)
         MLE_pretrain(50, mlecount)
         mlecount += 50
