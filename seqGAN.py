@@ -31,6 +31,8 @@ torch.cuda.device(0) # let's go
 # precompute input tokens
 tokens = [torch.LongTensor([[x]]).cuda() for x in range(22)]
 
+token_lookup = {'@': 1,         'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6,
+                'F': 7, 'G': 8, 'H': 9, 'I':10, 'J':11, 'K':12, 'L': 13}
 
 MAX_IN_SEQ_LEN = 150
 MAX_OUT_SEQ_LEN = 6
@@ -321,6 +323,8 @@ def unroll(encoder, decoder, rest_interactions, max_out_seq_len, f, scores_so_fa
         inlens.append(newlen)
         inputs[curlen:newlen] = new_example
 
+    assert(len(scores_so_far) == MAX_INTERACTIONS)
+
     return scores_so_far
 
 def samp(x):
@@ -328,7 +332,7 @@ def samp(x):
     return v
 
 # a single input sequence, a single target output sequence, and we run
-def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
+def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
@@ -381,6 +385,8 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     # intermediate score array, intermediate prefix array
     interactions = 0 # count of interactions we've had so far in this rollout
     cur_prefix = []
+    last_cut = 0
+    this_cut = 0
     for t in range(len(rollout_hiddens)):
         prefixes.append((interactions, cur_prefix))
 
@@ -388,6 +394,24 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
         if rollout_selected[t] == SOS:
             interactions += 1
             cur_prefix = []
+            last_cut = this_cut
+            this_cut = t
+
+    # teacher forcing!
+    # chop off the last interaction and replace it with the correct answer
+    # when we fail to get it...
+    forced = False
+    if random.uniform(0, 1) < teacher_forcing_ratio and interactions == MAX_INTERACTIONS:
+        # find index of last prefix sequence
+        print "will force target %s" % targ_seq
+        forced = True
+        prefixes = prefixes[:last_cut + 1]
+        cur_prefix = []
+        for p in range(len(targ_seq)):
+            prefixes.append((interactions - 1, cur_prefix))
+
+            cur_prefix = cur_prefix + [token_lookup[targ_seq[p]]]
+        prefixes.append((interactions - 1, cur_prefix))
 
     for t in range(len(rollout_hiddens)):
         interactions = prefixes[t][0]
@@ -400,10 +424,18 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
 
         distro = torch.exp(rollout_outputs[t])
         #select = torch.multinomial(distro, EXP_SUBSAMPLE, replacement=False).data.cpu().numpy()[0]
-        if len(prefix) < max_out_seq_len:
-            select = [rollout_selected[t]] * EXP_SUBSAMPLE
-        else:
-            select = [SOS] * EXP_SUBSAMPLE
+        if forced and interactions == MAX_INTERACTIONS - 1:
+            p = t - last_cut - 1
+            print "forcing char %s: %s" % (str(p), targ_seq[p])
+            if p != len(targ_seq):
+                select = [token_lookup[targ_seq[p]]] * EXP_SUBSAMPLE
+            else:
+                select = [SOS] * EXP_SUBSAMPLE
+        else: # behave normally
+            if len(prefix) < max_out_seq_len:
+                select = [rollout_selected[t]] * EXP_SUBSAMPLE
+            else:
+                select = [SOS] * EXP_SUBSAMPLE
         assert(len(prefix) <= max_out_seq_len)
 
         tot_est = 0.
@@ -440,6 +472,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
 
         print("carlo %s/%s, value %s = ll %s * est %s" % (str(t + 1), str(len(rollout_hiddens)), str((tot_est / tot_density).data.cpu().numpy()[0]),
                                                           str(rollout_outputs[t][0, select[e]].data.cpu().numpy()[0]), str(sample_est / MONTE_CARLO_N)))
+        print prefixes[t]
 
     def clamp(message):
         def _internal(x):
@@ -465,7 +498,7 @@ encoder = Encoder(22, 128, 512, 3).cuda()
 decoder = Decoder(14, 512, num_layers=3).cuda()
 
 learning_rate = 0.001
-#teacher_forcing_ratio = 0.3
+teacher_forcing_ratio = 0.3
 # create encoder outputs
 # given some input sequence - input
 
@@ -512,8 +545,6 @@ for epoch in range(200):
     epoch_Xs = []
     epoch_Yi = []
     epoch_Ys = []
-    lookup = {'@': 1,         'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6,
-              'F': 7, 'G': 8, 'H': 9, 'I':10, 'J':11, 'K':12, 'L': 13}
     for d in range(len(data)):
         random.shuffle(in_sample)
         inseq = [tokens[SOS]]
@@ -525,7 +556,7 @@ for epoch in range(200):
         inseq.append(tokens[EOS])
         epoch_Xs.append(torch.cat(inseq, dim=0))
 
-        outseq = [tokens[lookup[c]] for c in data[data_sample[d]][0]]
+        outseq = [tokens[token_lookup[c]] for c in data[data_sample[d]][0]]
         epoch_Yi.append(torch.cat([tokens[SOS]] + outseq + [tokens[0]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
         epoch_Ys.append(torch.cat(outseq + [tokens[SOS]] + [tokens[14]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
 
@@ -607,7 +638,7 @@ for epoch in range(100):
         print "  DATA %s" % str(inseq)
 
         # get rewards on each input
-        J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][2])
+        J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0])
 
         print("  PUNISH %s" % str(J_single.data.cpu().numpy()[0]))
 
