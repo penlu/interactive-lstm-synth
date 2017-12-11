@@ -498,7 +498,7 @@ encoder = Encoder(22, 128, 512, 3).cuda()
 decoder = Decoder(14, 512, num_layers=3).cuda()
 
 learning_rate = 0.001
-teacher_forcing_ratio = 0.3
+teacher_forcing_ratio = 0.3 # value doesn't matter; immediately overwritten
 # create encoder outputs
 # given some input sequence - input
 
@@ -526,7 +526,7 @@ data_sample = range(len(data))
 
 
 # PRE-TRAIN
-NSAMPLES=5
+NSAMPLES=8
 
 encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
@@ -600,24 +600,27 @@ for epoch in range(200):
     decoder_optimizer.step()
 
 # seqGAN training step
-RL_BATCHSIZE=4
+RL_BATCHSIZE=8
 
 # rigged for small-set observation
-random.shuffle(data_sample)
-inlists = []
-for d in range(RL_BATCHSIZE):
-    random.shuffle(in_sample)
-    inlists.append(in_sample[:])
+#random.shuffle(data_sample)
+#inlists = []
+#for d in range(RL_BATCHSIZE):
+#    random.shuffle(in_sample)
+#    inlists.append(in_sample[:])
 
 for epoch in range(100):
-    print("RL EPOCH %s" % str(epoch + 1))
+    print("RL EPOCH %s ===============================================" % str(epoch + 1))
+
+    teacher_forcing_ratio = 13. / (13. + math.exp(float(epoch) / 13))
+    print("    TF RATIO %s" % str(teacher_forcing_ratio))
 
     # zero gradients
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
     # sample data
-    #random.shuffle(data_sample)
+    random.shuffle(data_sample)
 
     J = 0.
     for d in range(RL_BATCHSIZE):
@@ -625,8 +628,8 @@ for epoch in range(100):
         print data[data_sample[d]][0]
 
         # prepare inputs
-        #random.shuffle(in_sample) # pick which I/O pairs to provide
-        in_sample = inlists[d] # for small-set observation
+        random.shuffle(in_sample) # pick which I/O pairs to provide
+        #in_sample = inlists[d] # for small-set observation
 
         inseq = [SOS]
         for i in range(NSAMPLES):
