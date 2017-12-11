@@ -569,7 +569,15 @@ for epoch in range(200):
     decoder_optimizer.step()
 
 # seqGAN training step
-RL_BATCHSIZE=8
+RL_BATCHSIZE=4
+
+# rigged for small-set observation
+random.shuffle(data_sample)
+inlists = []
+for d in range(RL_BATCHSIZE):
+    random.shuffle(in_sample)
+    inlists.append(in_sample[:])
+
 for epoch in range(100):
     print("RL EPOCH %s" % str(epoch + 1))
 
@@ -578,7 +586,7 @@ for epoch in range(100):
     decoder_optimizer.zero_grad()
 
     # sample data
-    random.shuffle(data_sample)
+    #random.shuffle(data_sample)
 
     J = 0.
     for d in range(RL_BATCHSIZE):
@@ -586,7 +594,9 @@ for epoch in range(100):
         print data[data_sample[d]][0]
 
         # prepare inputs
-        random.shuffle(in_sample) # pick which I/O pairs to provide
+        #random.shuffle(in_sample) # pick which I/O pairs to provide
+        in_sample = inlists[d] # for small-set observation
+
         inseq = [SOS]
         for i in range(NSAMPLES):
             samp_in = in_sample[i]
