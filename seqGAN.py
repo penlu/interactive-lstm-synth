@@ -519,7 +519,7 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
 
 def discriminator(scores):
     return (sum(scores) - 25.6 * len(scores) + \
-                          (5000 if len(scores) < MAX_INTERACTIONS else -1000)) / 5000
+                          (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 5000
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
