@@ -404,7 +404,7 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
     # chop off the last interaction and replace it with the correct answer
     # when we fail to get it...
     forced = False
-    if random.uniform(0, 1) < teacher_forcing_ratio and interactions == MAX_INTERACTIONS:
+    if random.uniform(0, 1) < teacher_forcing_ratio and len(scores) == MAX_INTERACTIONS:
         forced = True
 
         # find index of last prefix sequence---recalculate hiddens and outputs
