@@ -519,7 +519,7 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
     return J, rollout_outputs, rollout_hiddens, final_sample_est
 
 def discriminator(scores):
-    return (sum(scores) - 25.6 * len(scores) + \
+    return (sum(scores) - #25.6 * len(scores) + \
                           (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 10000
 
 
@@ -565,8 +565,8 @@ pre_loss = torch.nn.NLLLoss(ignore_index=14)
 PRE_BATCHSIZE=300
 
 def MLE_pretrain(epochs, pre):
-    for epoch in range(epochs):
-        print("PRE EPOCH %s" % str(epoch + pre + 1))
+    for epoch in range(pre, pre + epochs):
+        print("PRE EPOCH %s" % str(epoch + 1))
 
         # zero gradients
         encoder_optimizer.zero_grad()
@@ -641,8 +641,8 @@ RL_BATCHSIZE=8
 #    inlists.append(in_sample[:])
 
 def RL_train(epochs, pre):
-    for epoch in range(epochs):
-        print("RL EPOCH %s ===============================================" % str(epoch + pre + 1))
+    for epoch in range(pre, pre + epochs):
+        print("RL EPOCH %s ===============================================" % str(epoch + 1))
 
         teacher_forcing_ratio = 13. / (13. + math.exp(float(epoch) / 13))
         print("    TF RATIO %s" % str(teacher_forcing_ratio))
