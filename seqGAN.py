@@ -3,6 +3,7 @@
 
 from eval import Evaluator
 
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
@@ -372,7 +373,7 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
     print(rollout_selected)
 
     assert len(rollout_hiddens) == len(rollout_outputs)
-    assert len(rollout_outputs) == len(rollout_selected)
+    assert len(rollout_hiddens) == len(rollout_selected)
 
 
     # perform MC rollout to estimate final RL reward, in the style of SeqGAN
@@ -397,15 +398,37 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
             last_cut = this_cut
             this_cut = t
 
+    assert len(rollout_hiddens) == len(prefixes)
+
     # teacher forcing!
     # chop off the last interaction and replace it with the correct answer
     # when we fail to get it...
     forced = False
     if random.uniform(0, 1) < teacher_forcing_ratio and interactions == MAX_INTERACTIONS:
-        # find index of last prefix sequence
-        print "will force target %s" % targ_seq
         forced = True
+
+        # find index of last prefix sequence---recalculate hiddens and outputs
         prefixes = prefixes[:last_cut + 1]
+
+        force_dec_hidden = rollout_hiddens[last_cut + 1]
+        rollout_hiddens = rollout_hiddens[:last_cut + 1]
+        rollout_outputs = rollout_outputs[:last_cut + 1]
+
+        # recalculate hiddens and outputs
+        rollout_hiddens.append(force_dec_hidden)
+        force_choice = Variable(tokens[SOS], requires_grad=False)
+        force_dec_output, force_dec_hidden = decoder(force_choice, force_dec_hidden)
+        rollout_outputs.append(force_dec_output)
+        for di in range(len(targ_seq)):
+            rollout_hiddens.append(force_dec_hidden)
+            force_choice = Variable(tokens[token_lookup[targ_seq[di]]], requires_grad=False)
+            force_dec_output, force_dec_hidden = decoder(force_choice, force_dec_hidden)
+            rollout_outputs.append(force_dec_output)
+
+        assert len(rollout_hiddens) == len(rollout_outputs)
+
+        # replace last prefix sequence
+        print "will force target %s" % targ_seq
         cur_prefix = []
         for p in range(len(targ_seq)):
             prefixes.append((interactions - 1, cur_prefix))
@@ -413,6 +436,10 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
             cur_prefix = cur_prefix + [token_lookup[targ_seq[p]]]
         prefixes.append((interactions - 1, cur_prefix))
 
+        assert len(rollout_hiddens) == len(prefixes)
+
+
+    # main seqGAN grad estimation loop
     for t in range(len(rollout_hiddens)):
         interactions = prefixes[t][0]
         prefix = prefixes[t][1]
@@ -424,12 +451,13 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
 
         distro = torch.exp(rollout_outputs[t])
         #select = torch.multinomial(distro, EXP_SUBSAMPLE, replacement=False).data.cpu().numpy()[0]
-        if forced and interactions == MAX_INTERACTIONS - 1:
+        if forced and interactions >= MAX_INTERACTIONS - 1:
             p = t - last_cut - 1
-            print "forcing char %s: %s" % (str(p), targ_seq[p])
             if p != len(targ_seq):
+                print "forcing char %s: %s" % (str(p), targ_seq[p])
                 select = [token_lookup[targ_seq[p]]] * EXP_SUBSAMPLE
             else:
+                print "forcing char %s: SOS" % str(p)
                 select = [SOS] * EXP_SUBSAMPLE
         else: # behave normally
             if len(prefix) < max_out_seq_len:
@@ -526,7 +554,7 @@ data_sample = range(len(data))
 
 
 # PRE-TRAIN
-NSAMPLES=8
+NSAMPLES=6
 
 encoder_optimizer = optim.Adam(encoder.parameters(), lr = learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
