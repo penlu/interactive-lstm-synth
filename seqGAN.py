@@ -502,6 +502,7 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
                                                           str(rollout_outputs[t][0, select[e]].data.cpu().numpy()[0]), str(sample_est / MONTE_CARLO_N)))
         print prefixes[t]
 
+    # clamp gradients
     def clamp(message):
         def _internal(x):
             #print message
@@ -515,11 +516,11 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
         rollout_hiddens[i][0].register_hook(clamp("hidden h %s grad" % str(i)))
         rollout_hiddens[i][1].register_hook(clamp("hidden c %s grad" % str(i)))
 
-    return J, rollout_outputs, rollout_hiddens
+    return J, rollout_outputs, rollout_hiddens, final_sample_est
 
 def discriminator(scores):
     return (sum(scores) - 25.6 * len(scores) + \
-                          (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 5000
+                          (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 10000
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
@@ -562,70 +563,72 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 pre_loss = torch.nn.NLLLoss(ignore_index=14)
 
 PRE_BATCHSIZE=300
-for epoch in range(200):
-    print("PRE EPOCH %s" % str(epoch + 1))
 
-    # zero gradients
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
+def MLE_pretrain(epochs, pre):
+    for epoch in range(epochs):
+        print("PRE EPOCH %s" % str(epoch + pre + 1))
 
-    # prepare data for epoch
-    epoch_Xs = []
-    epoch_Yi = []
-    epoch_Ys = []
-    for d in range(len(data)):
-        random.shuffle(in_sample)
-        inseq = [tokens[SOS]]
-        for i in range(NSAMPLES):
-            samp_in = in_sample[i]
-            samp_out = data[data_sample[d]][1][samp_in]
-            inseq.extend([tokens[samp_in /16+2], tokens[samp_in %16+2], tokens[18],
-                          tokens[samp_out/16+2], tokens[samp_out%16+2], tokens[19]])
-        inseq.append(tokens[EOS])
-        epoch_Xs.append(torch.cat(inseq, dim=0))
+        # zero gradients
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
 
-        outseq = [tokens[token_lookup[c]] for c in data[data_sample[d]][0]]
-        epoch_Yi.append(torch.cat([tokens[SOS]] + outseq + [tokens[0]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
-        epoch_Ys.append(torch.cat(outseq + [tokens[SOS]] + [tokens[14]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
+        # prepare data for epoch
+        epoch_Xs = []
+        epoch_Yi = []
+        epoch_Ys = []
+        for d in range(len(data)):
+            random.shuffle(in_sample)
+            inseq = [tokens[SOS]]
+            for i in range(NSAMPLES):
+                samp_in = in_sample[i]
+                samp_out = data[data_sample[d]][1][samp_in]
+                inseq.extend([tokens[samp_in /16+2], tokens[samp_in %16+2], tokens[18],
+                              tokens[samp_out/16+2], tokens[samp_out%16+2], tokens[19]])
+            inseq.append(tokens[EOS])
+            epoch_Xs.append(torch.cat(inseq, dim=0))
 
-    epoch_Xs = torch.stack(epoch_Xs, dim=1)
-    epoch_Yi = torch.stack(epoch_Yi, dim=1)
-    epoch_Ys = torch.stack(epoch_Ys, dim=1)
+            outseq = [tokens[token_lookup[c]] for c in data[data_sample[d]][0]]
+            epoch_Yi.append(torch.cat([tokens[SOS]] + outseq + [tokens[0]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
+            epoch_Ys.append(torch.cat(outseq + [tokens[SOS]] + [tokens[14]] * (MAX_OUT_SEQ_LEN - len(outseq)), dim=0))
 
-    # model forward compute
-    loss = 0.
-    for b in range(epoch_Xs.size()[1] / PRE_BATCHSIZE + 1):
-        start, end = b * PRE_BATCHSIZE, min((b + 1) * PRE_BATCHSIZE, epoch_Xs.size()[1])
-        bsize = end - start
+        epoch_Xs = torch.stack(epoch_Xs, dim=1)
+        epoch_Yi = torch.stack(epoch_Yi, dim=1)
+        epoch_Ys = torch.stack(epoch_Ys, dim=1)
 
-        # 1. initialize encoder hidden state
-        encoder_hidden = encoder.init_hidden(batches=bsize)
+        # model forward compute
+        loss = 0.
+        for b in range(epoch_Xs.size()[1] / PRE_BATCHSIZE + 1):
+            start, end = b * PRE_BATCHSIZE, min((b + 1) * PRE_BATCHSIZE, epoch_Xs.size()[1])
+            bsize = end - start
 
-        # 2. encoder forward compute
-        _, decoder_hidden = encoder(Variable(epoch_Xs[:, start:end, :], requires_grad=False), encoder_hidden)
-        #decoder_input = Variable(tokens[SOS].repeat(1, bsize, 1))
+            # 1. initialize encoder hidden state
+            encoder_hidden = encoder.init_hidden(batches=bsize)
 
-        # 3. decoder recurrent loop
-        outputs = []
-        for i in range(MAX_OUT_SEQ_LEN + 1):
-            decoder_output, decoder_hidden = decoder(Variable(epoch_Yi[i, start:end ,:], requires_grad=False), decoder_hidden)
+            # 2. encoder forward compute
+            _, decoder_hidden = encoder(Variable(epoch_Xs[:, start:end, :], requires_grad=False), encoder_hidden)
+            #decoder_input = Variable(tokens[SOS].repeat(1, bsize, 1))
 
-            outputs.append(decoder_output)
+            # 3. decoder recurrent loop
+            outputs = []
+            for i in range(MAX_OUT_SEQ_LEN + 1):
+                decoder_output, decoder_hidden = decoder(Variable(epoch_Yi[i, start:end ,:], requires_grad=False), decoder_hidden)
 
-            # TODO implement teacher forcing
-            # sample next input
-            #decoder_input = torch.multinomial(torch.exp(decoder_output), 1).view(1, -1, 1)
+                outputs.append(decoder_output)
 
-        # 4. finish off outputs
-        outputs = torch.stack(outputs, dim=0)
+                # TODO implement teacher forcing
+                # sample next input
+                #decoder_input = torch.multinomial(torch.exp(decoder_output), 1).view(1, -1, 1)
 
-        loss += sum([pre_loss(outputs[:, bi, :], Variable(epoch_Ys[:, start+bi, 0], requires_grad=False)) for bi in range(bsize)])
+            # 4. finish off outputs
+            outputs = torch.stack(outputs, dim=0)
 
-    loss.backward()
-    print "    loss %s" % str(loss.data.cpu().numpy()[0])
+            loss += sum([pre_loss(outputs[:, bi, :], Variable(epoch_Ys[:, start+bi, 0], requires_grad=False)) for bi in range(bsize)])
 
-    encoder_optimizer.step()
-    decoder_optimizer.step()
+        loss.backward()
+        print "    loss %s" % str(loss.data.cpu().numpy()[0])
+
+        encoder_optimizer.step()
+        decoder_optimizer.step()
 
 # seqGAN training step
 RL_BATCHSIZE=8
@@ -637,47 +640,61 @@ RL_BATCHSIZE=8
 #    random.shuffle(in_sample)
 #    inlists.append(in_sample[:])
 
-for epoch in range(100):
-    print("RL EPOCH %s ===============================================" % str(epoch + 1))
+def RL_train(epochs, pre):
+    for epoch in range(epochs):
+        print("RL EPOCH %s ===============================================" % str(epoch + pre + 1))
 
-    teacher_forcing_ratio = 13. / (13. + math.exp(float(epoch) / 13))
-    print("    TF RATIO %s" % str(teacher_forcing_ratio))
+        teacher_forcing_ratio = 13. / (13. + math.exp(float(epoch) / 13))
+        print("    TF RATIO %s" % str(teacher_forcing_ratio))
 
-    # zero gradients
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
+        # zero gradients
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
 
-    # sample data
-    random.shuffle(data_sample)
+        # sample data
+        random.shuffle(data_sample)
 
-    J = 0.
-    for d in range(RL_BATCHSIZE):
-        print("RL EPOCH %s DATA %s/%s" % (str(epoch + 1), str(d + 1), RL_BATCHSIZE))
-        print data[data_sample[d]][0]
+        J = 0.
+        count = 0
+        for d in range(RL_BATCHSIZE):
+            print("RL EPOCH %s DATA %s/%s" % (str(epoch + 1), str(d + 1), RL_BATCHSIZE))
+            print data[data_sample[d]][0]
 
-        # prepare inputs
-        random.shuffle(in_sample) # pick which I/O pairs to provide
-        #in_sample = inlists[d] # for small-set observation
+            # prepare inputs
+            random.shuffle(in_sample) # pick which I/O pairs to provide
+            #in_sample = inlists[d] # for small-set observation
 
-        inseq = [SOS]
-        for i in range(NSAMPLES):
-            samp_in = in_sample[i]
-            samp_out = data[data_sample[d]][1][samp_in]
-            inseq.extend([samp_in /16+2,samp_in %16+2, 18,
-                          samp_out/16+2,samp_out%16+2, 19])
-        inseq.append(EOS)
-        print "  DATA %s" % str(inseq)
+            inseq = [SOS]
+            for i in range(NSAMPLES):
+                samp_in = in_sample[i]
+                samp_out = data[data_sample[d]][1][samp_in]
+                inseq.extend([samp_in /16+2,samp_in %16+2, 18,
+                              samp_out/16+2,samp_out%16+2, 19])
+            inseq.append(EOS)
+            print "  DATA %s" % str(inseq)
 
-        # get rewards on each input
-        J_single, outs, hids = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0])
+            # get rewards on each input
+            J_single, outs, hids, samp = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0])
+            if samp > 0.9:
+                count += 1
 
-        print("  PUNISH %s" % str(J_single.data.cpu().numpy()[0]))
+            print("  PUNISH %s" % str(J_single.data.cpu().numpy()[0]))
 
-        J += J_single
+            J += J_single
 
-    # grad descent
-    J.backward()
+        # grad descent
+        J.backward()
 
-    encoder_optimizer.step()
-    decoder_optimizer.step()
+        encoder_optimizer.step()
+        decoder_optimizer.step()
 
+        return count
+
+MLE_pretrain(200)
+mlecount = 200
+for i in range(100):
+    ct = RL_train(1, i)
+    if ct <= 2:
+        print "RETRAINING MLE"
+        MLE_pretrain(50, mlecount)
+        mlecount += 50
