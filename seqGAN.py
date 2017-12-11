@@ -428,8 +428,8 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
     return J, rollout_outputs, rollout_hiddens
 
 def discriminator(scores):
-    return sum(scores) + 50 * (MAX_INTERACTIONS - len(scores)) + \
-                          (5000 if len(scores) < MAX_INTERACTIONS else 0)
+    return (sum(scores) - 25.6 * len(scores) + \
+                          (5000 if len(scores) < MAX_INTERACTIONS else 0)) / 5000
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
@@ -541,7 +541,7 @@ for epoch in range(1000):
 
 # seqGAN training step
 RL_BATCHSIZE=4
-for epoch in range(20):
+for epoch in range(100):
     print("RL EPOCH %s" % str(epoch + 1))
 
     # zero gradients
