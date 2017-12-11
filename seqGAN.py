@@ -429,7 +429,7 @@ def train_single(encoder, decoder, input_sequence, f, max_in_seq_length=MAX_IN_S
 
 def discriminator(scores):
     return sum(scores) + 50 * (MAX_INTERACTIONS - len(scores)) + \
-                          5000 if len(scores) < MAX_INTERACTIONS else 0
+                          (5000 if len(scores) < MAX_INTERACTIONS else 0)
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
@@ -472,7 +472,7 @@ decoder_optimizer = optim.Adam(decoder.parameters(), lr = learning_rate)
 pre_loss = torch.nn.NLLLoss(ignore_index=14)
 
 PRE_BATCHSIZE=300
-for epoch in range(200):
+for epoch in range(1000):
     print("PRE EPOCH %s" % str(epoch + 1))
 
     # zero gradients
