@@ -675,7 +675,7 @@ def RL_train(epochs, pre):
 
             # get rewards on each input
             J_single, outs, hids, samp = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0])
-            if samp > 0.9:
+            if samp > 0.4:
                 count += 1
 
             print("  PUNISH %s" % str(J_single.data.cpu().numpy()[0]))
