@@ -745,7 +745,7 @@ def RL_train(epochs, pre):
 print "TEST_EVAL: START: %s" % str(test_eval())
 
 mlecount = 0
-for i in range(200):
+for i in range(2000):
     MLE_pretrain(1, mlecount)
     print "TEST_EVAL: MLE: %s" % str(test_eval())
     mlecount += 1
