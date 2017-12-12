@@ -333,7 +333,7 @@ def samp(x):
     return v
 
 # a single input sequence, a single target output sequence, and we run
-def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
+def train_single(encoder, decoder, input_sequence, f, targ_seq, teacher_forcing_ratio, max_in_seq_length=MAX_IN_SEQ_LEN, max_out_seq_len=MAX_OUT_SEQ_LEN):
     """
     both input_sequence and target_sequence should be variables
     """
@@ -404,7 +404,10 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
     # chop off the last interaction and replace it with the correct answer
     # when we fail to get it...
     forced = False
+    print len(scores)
+    print teacher_forcing_ratio
     if random.uniform(0, 1) < teacher_forcing_ratio and len(scores) == MAX_INTERACTIONS:
+        print "will force target %s" % targ_seq
         forced = True
 
         # find index of last prefix sequence---recalculate hiddens and outputs
@@ -428,7 +431,6 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
         assert len(rollout_hiddens) == len(rollout_outputs)
 
         # replace last prefix sequence
-        print "will force target %s" % targ_seq
         cur_prefix = []
         for p in range(len(targ_seq)):
             prefixes.append((interactions - 1, cur_prefix))
@@ -520,7 +522,7 @@ def train_single(encoder, decoder, input_sequence, f, targ_seq, max_in_seq_lengt
 
 def discriminator(scores):
     return (float(sum(scores)) + #- 25.6 * len(scores) + \
-                          (5000. if len(scores) < MAX_INTERACTIONS else 0.)) / 10000
+                          (5000. if len(scores) < MAX_INTERACTIONS else 0.)) / 5000
 
 
 encoder = Encoder(22, 128, 512, 3).cuda()
@@ -554,6 +556,53 @@ in_sample = range(256)
 data_sample = range(len(data))
 
 
+# test accuracy on full data
+TEST_ACC_SAMP = 30
+def test_eval():
+    random.shuffle(data_sample)
+
+    tot_score = 0.
+    long_zeros_in = torch.LongTensor(MAX_IN_SEQ_LEN, 1).zero_().cuda()
+    for d in range(min(len(data), TEST_ACC_SAMP)):
+        random.shuffle(in_sample)
+        inseq = [SOS]
+        for i in range(NSAMPLES):
+            samp_in = in_sample[i]
+            samp_out = data[data_sample[d]][1][samp_in]
+            inseq.extend([samp_in /16+2, samp_in %16+2, 18,
+                          samp_out/16+2, samp_out%16+2, 19])
+        inseq.append(EOS)
+
+        input_sequence = inseq
+
+        # initialize encoder hidden state
+        encoder_hidden = encoder.init_hidden()
+
+        # reformat input
+        inputs = long_zeros_in.clone()
+        inputs[:len(input_sequence)] = torch.cat([tokens[x] for x in input_sequence], dim = 0)
+
+        # score prefix
+        scores = []
+
+        # save intermediate hidden states, output multinomials, selected outputs for future rollout
+        rollout_hiddens = [] # rollout_hiddens[t] = Y_1:t-1
+        rollout_outputs = [] # rollout_outputs[t] = G(y_t | Y_1:t-1)
+        rollout_selected = [] # rollout_selected[t] = y_t
+        rollout_inputs = inputs #input_sequence[:] # stuff what goes to the encoder
+        rollout_inlens = [len(input_sequence)]
+
+        # perform a single full unroll
+        final_sample_scores = unroll(encoder, decoder, MAX_INTERACTIONS, MAX_OUT_SEQ_LEN,
+                                    data[data_sample[d]][2], scores,
+                                    encoder_hidden, None, [],
+                                    rollout_hiddens, rollout_outputs, rollout_selected,
+                                    rollout_inlens, rollout_inputs,
+                                    samp) #lambda x: x.data.topk(1)[1][0][0])
+        tot_score += discriminator(final_sample_scores)
+    return tot_score / min(len(data), TEST_ACC_SAMP)
+
+
 # PRE-TRAIN
 NSAMPLES=6
 
@@ -571,6 +620,8 @@ def MLE_pretrain(epochs, pre):
         # zero gradients
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
+
+        random.shuffle(data_sample)
 
         # prepare data for epoch
         epoch_Xs = []
@@ -674,7 +725,7 @@ def RL_train(epochs, pre):
             print "  DATA %s" % str(inseq)
 
             # get rewards on each input
-            J_single, outs, hids, samp = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0])
+            J_single, outs, hids, samp = train_single(encoder, decoder, inseq, data[data_sample[d]][2], data[data_sample[d]][0], teacher_forcing_ratio)
             print "  SAMPLED %s" % str(samp)
             if samp > 0.4:
                 count += 1
@@ -691,11 +742,19 @@ def RL_train(epochs, pre):
 
         return count
 
-MLE_pretrain(200, 0)
-mlecount = 200
+print "TEST_EVAL: START: %s" % str(test_eval())
+
+mlecount = 0
+for i in range(200):
+    MLE_pretrain(1, mlecount)
+    print "TEST_EVAL: MLE: %s" % str(test_eval())
+    mlecount += 1
 for i in range(100):
     ct = RL_train(1, i)
-    if ct <= 2:
+    print "TEST_EVAL: RL: %s" % str(test_eval())
+    if ct <= 0:
         print "RETRAINING MLE, COUNT %s" % str(ct)
-        MLE_pretrain(50, mlecount)
-        mlecount += 50
+        for x in range(50):
+            MLE_pretrain(1, mlecount)
+            print "TEST_EVAL: MLE_RE: %s" % str(test_eval())
+            mlecount += 1
